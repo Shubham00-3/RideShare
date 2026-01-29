@@ -1,0 +1,62 @@
+.team {
+    background: var(--color-white);
+}
+
+.team__grid {
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.team__card {
+    text-align: center;
+    padding: var(--spacing-10) var(--spacing-6);
+    opacity: 0;
+    animation: fadeInUp 0.5s ease-out forwards;
+}
+
+.team__avatar {
+    width: 100px;
+    height: 100px;
+    margin: 0 auto var(--spacing-6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--color-gray-100) 0%, var(--color-gray-200) 100%);
+    border-radius: var(--radius-full);
+    font-size: 3rem;
+}
+
+.team__name {
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-black);
+    margin-bottom: var(--spacing-2);
+}
+
+.team__role {
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-gray-500);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--spacing-4);
+}
+
+.team__bio {
+    font-size: var(--font-size-base);
+    color: var(--color-gray-600);
+    line-height: 1.7;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .team__card {
+        padding: var(--spacing-8) var(--spacing-4);
+    }
+
+    .team__avatar {
+        width: 80px;
+        height: 80px;
+        font-size: 2.5rem;
+    }
+}

@@ -1,0 +1,210 @@
+.hero {
+    min-height: 100vh;
+    padding-top: var(--header-height);
+    background: var(--color-white);
+}
+
+.hero__container {
+    display: flex;
+    min-height: calc(100vh - var(--header-height));
+    align-items: stretch;
+}
+
+/* Left Card Section */
+.hero__card-wrapper {
+    width: 45%;
+    /* Slightly wider to give more room */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-8) var(--spacing-12);
+    background: var(--color-white);
+    position: relative;
+    z-index: 10;
+}
+
+.hero__card {
+    width: 100%;
+    max-width: 480px;
+}
+
+.hero__card-title {
+    font-size: 3.5rem;
+    /* Massive heading like Uber */
+    font-weight: var(--font-weight-extrabold);
+    margin-bottom: var(--spacing-10);
+    line-height: 1.1;
+    letter-spacing: -0.04em;
+}
+
+/* Input Group - Refined */
+.hero__inputs {
+    position: relative;
+    margin-bottom: var(--spacing-8);
+}
+
+.hero__input-group {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-4);
+    padding: var(--spacing-4);
+    background: var(--color-gray-50);
+    border-radius: var(--radius-lg);
+    transition: all var(--transition-base);
+    border: 1px solid transparent;
+    /* Prepare for focus state */
+}
+
+.hero__input-group:first-child {
+    margin-bottom: var(--spacing-3);
+    position: relative;
+}
+
+/* Connector line logic */
+.hero__input-group:first-child::after {
+    content: '';
+    position: absolute;
+    left: 35px;
+    /* Aligned with icon center */
+    bottom: -15px;
+    /* Extend down to next input */
+    width: 2px;
+    height: 24px;
+    background: var(--color-gray-300);
+    z-index: 1;
+}
+
+.hero__input-group:focus-within {
+    background: var(--color-white);
+    border-color: var(--color-black);
+    box-shadow: var(--shadow-md);
+}
+
+.hero__input-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.hero__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-black);
+}
+
+.hero__square {
+    width: 8px;
+    height: 8px;
+    background: var(--color-black);
+}
+
+.hero__input-connector {
+    display: none;
+    /* Handled by pseudo-element now for better scaling */
+}
+
+.hero__input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-family: var(--font-family);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-black);
+    outline: none;
+    padding: var(--spacing-1) 0;
+}
+
+.hero__input::placeholder {
+    color: var(--color-gray-500);
+    font-weight: var(--font-weight-normal);
+}
+
+/* Buttons */
+.hero__buttons {
+    display: flex;
+    flex-direction: row;
+    /* Side by side for actions */
+    gap: var(--spacing-4);
+}
+
+.hero__btn-primary {
+    flex: 2;
+    /* Primary action takes more space */
+    font-size: var(--font-size-lg);
+}
+
+.hero__btn-secondary {
+    flex: 1;
+    /* Make standard flow button smaller */
+    background: transparent;
+    border: 1px solid var(--color-gray-200);
+}
+
+.hero__btn-secondary:hover {
+    border-color: var(--color-black);
+    background: transparent;
+}
+
+
+/* Right Image Section */
+.hero__image {
+    flex: 1;
+    position: relative;
+    background-color: #f6f6f6;
+    /* Fallback */
+    overflow: hidden;
+}
+
+.hero__image-content {
+    position: absolute;
+    inset: 0;
+    background-image: url('https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?q=80&w=2070&auto=format&fit=crop');
+    /* Professional city abstract */
+    background-size: cover;
+    background-position: center;
+}
+
+/* No gradient overlay needed for Clean look, just pure image */
+.hero__image-overlay,
+.hero__tagline {
+    display: none;
+    /* Remove text overlay for cleaner Uber look */
+}
+
+
+/* Responsive */
+@media (max-width: 1024px) {
+    .hero__card-wrapper {
+        width: 50%;
+        padding: var(--spacing-8);
+    }
+}
+
+@media (max-width: 768px) {
+    .hero__container {
+        flex-direction: column-reverse;
+    }
+
+    .hero__card-wrapper {
+        width: 100%;
+        padding: var(--spacing-6) var(--spacing-4);
+    }
+
+    .hero__card-title {
+        font-size: 2.5rem;
+    }
+
+    .hero__image {
+        height: 35vh;
+        min-height: 250px;
+    }
+
+    .hero__buttons {
+        flex-direction: column;
+    }
+}

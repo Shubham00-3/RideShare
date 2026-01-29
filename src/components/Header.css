@@ -1,0 +1,118 @@
+.header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    transition: all var(--transition-base);
+}
+
+.header--scrolled {
+    box-shadow: var(--shadow-md);
+}
+
+.header__container {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: var(--spacing-4) var(--spacing-6);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.header__logo {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-bold);
+    color: var(--color-black);
+}
+
+.header__logo:hover {
+    color: var(--color-black);
+}
+
+.header__logo-icon {
+    font-size: var(--font-size-2xl);
+}
+
+.header__nav {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-8);
+}
+
+.header__nav-link {
+    background: none;
+    border: none;
+    font-family: var(--font-family);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-gray-700);
+    cursor: pointer;
+    transition: color var(--transition-fast);
+    padding: var(--spacing-2) 0;
+}
+
+.header__nav-link:hover {
+    color: var(--color-black);
+}
+
+.header__cta {
+    margin-left: var(--spacing-4);
+}
+
+.header__mobile-toggle {
+    display: none;
+    flex-direction: column;
+    gap: 5px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: var(--spacing-2);
+}
+
+.header__mobile-toggle span {
+    display: block;
+    width: 24px;
+    height: 2px;
+    background: var(--color-black);
+    transition: all var(--transition-fast);
+}
+
+/* Mobile Styles */
+@media (max-width: 768px) {
+    .header__nav {
+        position: fixed;
+        top: var(--header-height);
+        left: 0;
+        right: 0;
+        background: var(--color-white);
+        flex-direction: column;
+        padding: var(--spacing-6);
+        gap: var(--spacing-4);
+        box-shadow: var(--shadow-lg);
+        transform: translateY(-100%);
+        opacity: 0;
+        visibility: hidden;
+        transition: all var(--transition-base);
+    }
+
+    .header__nav--open {
+        transform: translateY(0);
+        opacity: 1;
+        visibility: visible;
+    }
+
+    .header__cta {
+        margin-left: 0;
+        width: 100%;
+    }
+
+    .header__mobile-toggle {
+        display: flex;
+    }
+}

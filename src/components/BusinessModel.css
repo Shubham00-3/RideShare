@@ -1,0 +1,159 @@
+.business-model {
+    background: var(--color-white);
+    padding-top: var(--spacing-24);
+    padding-bottom: var(--spacing-24);
+}
+
+/* Toggle Switch - Premium Tab Style */
+.business-model__toggle {
+    display: inline-flex;
+    position: relative;
+    margin: 0 auto var(--spacing-16);
+    background: var(--color-gray-100);
+    border-radius: var(--radius-full);
+    padding: var(--spacing-1);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.06);
+    /* Inset shadow for depth */
+}
+
+/* Center the toggle wrapper */
+.container:has(.business-model__toggle) {
+    text-align: center;
+}
+
+div:has(> .business-model__toggle) {
+    text-align: center;
+}
+
+
+.business-model__toggle-btn {
+    padding: var(--spacing-3) var(--spacing-8);
+    background: transparent;
+    border: none;
+    font-family: var(--font-family);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    color: var(--color-gray-600);
+    cursor: pointer;
+    position: relative;
+    z-index: 2;
+    transition: color var(--transition-base);
+    border-radius: var(--radius-full);
+    min-width: 160px;
+    /* Fixed width for stability */
+}
+
+.business-model__toggle-btn.active {
+    color: var(--color-black);
+}
+
+.business-model__toggle-indicator {
+    position: absolute;
+    top: var(--spacing-1);
+    left: var(--spacing-1);
+    width: calc(50% - var(--spacing-1));
+    height: calc(100% - var(--spacing-2));
+    background: var(--color-white);
+    border-radius: var(--radius-full);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    /* Floating card effect */
+}
+
+/* Content */
+.business-model__content {
+    min-height: 400px;
+}
+
+.business-model__view {
+    opacity: 0;
+    animation: fadeInUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.business-model__headline {
+    text-align: center;
+    font-size: var(--font-size-3xl);
+    /* 2.5rem */
+    font-weight: var(--font-weight-bold);
+    margin-bottom: var(--spacing-16);
+    color: var(--color-black);
+    letter-spacing: -0.02em;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Feature Cards - Minimalist & Clean */
+.feature-card {
+    text-align: left;
+    /* Align text left for cleaner look */
+    padding: var(--spacing-8);
+    opacity: 0;
+    animation: fadeInUp 0.5s ease-out forwards;
+    background: var(--color-white);
+    border: none;
+    /* No border for cleaner look */
+    box-shadow: none;
+    /* Remove default shadow */
+    transition: transform var(--transition-base);
+}
+
+.feature-card:hover {
+    transform: translateY(-5px);
+    box-shadow: none;
+    /* Keep flat */
+}
+
+.feature-card__icon {
+    font-size: 2.5rem;
+    margin-bottom: var(--spacing-6);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    background: var(--color-gray-50);
+    border-radius: var(--radius-xl);
+}
+
+.feature-card__title {
+    font-size: var(--font-size-xl);
+    font-weight: var(--font-weight-bold);
+    margin-bottom: var(--spacing-3);
+    color: var(--color-black);
+    letter-spacing: -0.01em;
+}
+
+.feature-card__description {
+    font-size: var(--font-size-base);
+    /* Larger body text */
+    color: var(--color-gray-600);
+    line-height: 1.6;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .business-model {
+        padding-top: var(--spacing-16);
+        padding-bottom: var(--spacing-16);
+    }
+
+    .business-model__toggle {
+        display: flex;
+        /* Full width on mobile */
+        width: 100%;
+        margin-left: 0;
+        margin-right: 0;
+    }
+
+    .business-model__toggle-btn {
+        flex: 1;
+        min-width: auto;
+        padding: var(--spacing-3) var(--spacing-2);
+    }
+
+    .business-model__headline {
+        font-size: var(--font-size-2xl);
+    }
+}
