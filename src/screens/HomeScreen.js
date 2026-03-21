@@ -1,34 +1,37 @@
 import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  ScrollView,
+  ActivityIndicator,
   Dimensions,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import {
+  Calendar,
+  Car,
+  ChevronRight,
   MapPin,
   Navigation,
   Search,
-  Users,
-  Car,
-  Calendar,
-  ChevronRight,
-  Star,
   Shield,
+  Star,
+  Users,
   Zap,
 } from 'lucide-react-native';
-import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
+import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
 import { USER_PROFILE } from '../constants/data';
+import { useRide } from '../context/RideContext';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
 export default function HomeScreen({ navigation }) {
-  const [pickup, setPickup] = useState('');
-  const [dropoff, setDropoff] = useState('');
-  const [selectedType, setSelectedType] = useState('shared');
+  const { error, loading, searchForm, searchRides } = useRide();
+  const [pickup, setPickup] = useState(searchForm.pickup);
+  const [dropoff, setDropoff] = useState(searchForm.dropoff);
+  const [selectedType, setSelectedType] = useState(searchForm.rideType);
 
   const rideTypes = [
     { id: 'shared', label: 'Shared Ride', icon: Users, savings: 'Save 40%', color: COLORS.success },
@@ -36,54 +39,59 @@ export default function HomeScreen({ navigation }) {
     { id: 'schedule', label: 'Schedule', icon: Calendar, savings: null, color: COLORS.accent },
   ];
 
+  const handleSearch = async () => {
+    await searchRides({
+      pickup,
+      dropoff,
+      rideType: selectedType,
+      allowMidTripPickup: selectedType !== 'solo',
+    });
+    navigation.navigate('RideMatch');
+  };
+
   return (
     <View style={styles.container}>
-      {/* Map Background Placeholder */}
       <View style={styles.mapContainer}>
         <View style={styles.mapPlaceholder}>
           <View style={styles.mapGrid}>
-            {Array.from({ length: 20 }).map((_, i) => (
-              <View key={i} style={styles.mapGridLine} />
+            {Array.from({ length: 20 }).map((_, index) => (
+              <View key={index} style={styles.mapGridLine} />
             ))}
           </View>
           <View style={styles.mapRoad1} />
           <View style={styles.mapRoad2} />
-          {/* Driver markers */}
           {[
             { top: '30%', left: '25%' },
             { top: '45%', left: '60%' },
             { top: '55%', left: '35%' },
             { top: '25%', left: '70%' },
-          ].map((pos, i) => (
-            <View key={i} style={[styles.driverMarker, { top: pos.top, left: pos.left }]}>
+          ].map((pos, index) => (
+            <View key={index} style={[styles.driverMarker, { top: pos.top, left: pos.left }]}>
               <Car size={14} color={COLORS.primary} />
             </View>
           ))}
-          {/* Center marker */}
           <View style={styles.centerMarker}>
             <View style={styles.centerMarkerDot} />
             <View style={styles.centerMarkerRing} />
           </View>
         </View>
 
-        {/* Top Bar */}
         <View style={styles.topBar}>
           <View style={styles.locationBadge}>
             <MapPin size={16} color={COLORS.primary} />
-            <Text style={styles.locationText}>New Delhi</Text>
+            <Text style={styles.locationText}>Delhi-NCR</Text>
           </View>
           <View style={styles.nearbyBadge}>
-            <Text style={styles.nearbyText}>12 Rides nearby</Text>
+            <Text style={styles.nearbyText}>Partial-route matching live</Text>
           </View>
         </View>
 
-        {/* Map Controls */}
         <View style={styles.mapControls}>
           <TouchableOpacity style={styles.mapControlButton}>
             <Text style={styles.mapControlText}>+</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.mapControlButton}>
-            <Text style={styles.mapControlText}>−</Text>
+            <Text style={styles.mapControlText}>-</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.mapControlButton, { marginTop: 8 }]}>
             <Navigation size={18} color={COLORS.primary} />
@@ -91,13 +99,13 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
 
-      {/* Bottom Sheet */}
       <View style={styles.bottomSheet}>
         <View style={styles.sheetHandle} />
+        <Text style={styles.sheetTitle}>Match overlapping routes</Text>
+        <Text style={styles.sheetSubtitle}>
+          Search for rides even if your destination is only partially aligned with another rider.
+        </Text>
 
-        <Text style={styles.sheetTitle}>Where are you going?</Text>
-
-        {/* Location Inputs */}
         <View style={styles.inputsContainer}>
           <View style={styles.inputDots}>
             <View style={styles.greenDot} />
@@ -129,7 +137,6 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Ride Type Selection */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.rideTypesScroll}>
           <View style={styles.rideTypes}>
             {rideTypes.map((type) => (
@@ -141,51 +148,85 @@ export default function HomeScreen({ navigation }) {
                 ]}
                 onPress={() => setSelectedType(type.id)}
               >
-                <View style={[styles.rideTypeIcon, selectedType === type.id && { backgroundColor: type.color + '20' }]}>
-                  <type.icon size={20} color={selectedType === type.id ? type.color : COLORS.textSecondary} />
+                <View
+                  style={[
+                    styles.rideTypeIcon,
+                    selectedType === type.id && { backgroundColor: `${type.color}20` },
+                  ]}
+                >
+                  <type.icon
+                    size={20}
+                    color={selectedType === type.id ? type.color : COLORS.textSecondary}
+                  />
                 </View>
-                <Text style={[styles.rideTypeLabel, selectedType === type.id && styles.rideTypeLabelActive]}>
+                <Text
+                  style={[
+                    styles.rideTypeLabel,
+                    selectedType === type.id && styles.rideTypeLabelActive,
+                  ]}
+                >
                   {type.label}
                 </Text>
-                {type.savings && (
+                {type.savings ? (
                   <View style={styles.savingsBadge}>
                     <Text style={styles.savingsText}>{type.savings}</Text>
                   </View>
-                )}
+                ) : null}
               </TouchableOpacity>
             ))}
           </View>
         </ScrollView>
 
-        {/* Quick Places */}
+        <View style={styles.strategyCard}>
+          <Text style={styles.strategyTitle}>MVP corridor strategy</Text>
+          <Text style={styles.strategyText}>
+            Prioritize dense commuter corridors first so match rates and driver earnings stay strong.
+          </Text>
+        </View>
+
         <View style={styles.quickPlaces}>
           {USER_PROFILE.savedPlaces.map((place) => (
-            <TouchableOpacity key={place.id} style={styles.quickPlace}>
+            <TouchableOpacity
+              key={place.id}
+              style={styles.quickPlace}
+              onPress={() => {
+                if (place.label === 'Home') {
+                  setPickup(place.address);
+                } else {
+                  setDropoff(place.address);
+                }
+              }}
+            >
               <View style={styles.quickPlaceIcon}>
                 <Star size={14} color={COLORS.primary} />
               </View>
               <View style={styles.quickPlaceInfo}>
                 <Text style={styles.quickPlaceLabel}>{place.label}</Text>
-                <Text style={styles.quickPlaceAddress} numberOfLines={1}>{place.address}</Text>
+                <Text style={styles.quickPlaceAddress} numberOfLines={1}>
+                  {place.address}
+                </Text>
               </View>
               <ChevronRight size={16} color={COLORS.textTertiary} />
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* Find Rides Button */}
-        <TouchableOpacity
-          style={styles.findButton}
-          onPress={() => navigation.navigate('RideMatch')}
-        >
-          <Search size={20} color={COLORS.textInverse} />
-          <Text style={styles.findButtonText}>Find Rides</Text>
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+        <TouchableOpacity style={styles.findButton} onPress={handleSearch} disabled={loading}>
+          {loading ? (
+            <ActivityIndicator color={COLORS.textInverse} />
+          ) : (
+            <>
+              <Search size={20} color={COLORS.textInverse} />
+              <Text style={styles.findButtonText}>Find Smart Matches</Text>
+            </>
+          )}
         </TouchableOpacity>
 
-        {/* Safety Badge */}
         <View style={styles.safetyBadge}>
           <Shield size={14} color={COLORS.success} />
-          <Text style={styles.safetyText}>All rides are insured & GPS tracked</Text>
+          <Text style={styles.safetyText}>Live quotes, insured rides, and backend-ready trip orchestration</Text>
           <Zap size={14} color={COLORS.warning} />
         </View>
       </View>
@@ -259,105 +300,113 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   centerMarkerDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
     backgroundColor: COLORS.primary,
-    zIndex: 2,
+    borderWidth: 3,
+    borderColor: COLORS.surface,
   },
   centerMarkerRing: {
     position: 'absolute',
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: COLORS.primary + '20',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: `${COLORS.primary}40`,
   },
   topBar: {
     position: 'absolute',
     top: 60,
-    left: 16,
-    right: 16,
+    left: 20,
+    right: 20,
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 10,
   },
   locationBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: SIZES.radius_full,
     gap: 6,
-    ...SHADOWS.medium,
+    backgroundColor: `${COLORS.surface}EE`,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 20,
   },
   locationText: {
-    fontSize: SIZES.md,
     color: COLORS.textPrimary,
     ...FONTS.semiBold,
   },
   nearbyBadge: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 14,
+    backgroundColor: `${COLORS.primary}E6`,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    borderRadius: SIZES.radius_full,
+    borderRadius: 20,
   },
   nearbyText: {
     color: COLORS.textInverse,
     fontSize: SIZES.sm,
-    ...FONTS.semiBold,
+    ...FONTS.medium,
   },
   mapControls: {
     position: 'absolute',
     right: 16,
-    top: '35%',
+    bottom: 140,
   },
   mapControlButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.surface,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
-    ...SHADOWS.medium,
+    backgroundColor: COLORS.surface,
+    marginBottom: 8,
+    ...SHADOWS.small,
   },
   mapControlText: {
-    fontSize: 20,
     color: COLORS.textPrimary,
+    fontSize: 22,
     ...FONTS.bold,
   },
   bottomSheet: {
     backgroundColor: COLORS.surface,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
     paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 20,
+    paddingTop: 14,
+    paddingBottom: 24,
+    minHeight: height * 0.53,
     ...SHADOWS.large,
   },
   sheetHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
+    width: 44,
+    height: 5,
+    borderRadius: 999,
     backgroundColor: COLORS.border,
     alignSelf: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   sheetTitle: {
     fontSize: SIZES.xxl,
     color: COLORS.textPrimary,
     ...FONTS.bold,
-    marginBottom: 16,
+  },
+  sheetSubtitle: {
+    color: COLORS.textSecondary,
+    marginTop: 6,
+    marginBottom: 18,
+    ...FONTS.regular,
   },
   inputsContainer: {
     flexDirection: 'row',
-    gap: 12,
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radius_xl,
+    padding: 14,
   },
   inputDots: {
     alignItems: 'center',
-    paddingTop: 18,
-    gap: 2,
+    marginRight: 12,
+    paddingTop: 10,
   },
   greenDot: {
     width: 10,
@@ -365,16 +414,19 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: COLORS.success,
   },
-  dottedLine: {
-    width: 2,
-    height: 30,
-    backgroundColor: COLORS.border,
-  },
   redDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
     backgroundColor: COLORS.error,
+  },
+  dottedLine: {
+    width: 2,
+    flex: 1,
+    borderStyle: 'dashed',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginVertical: 6,
   },
   inputs: {
     flex: 1,
@@ -382,128 +434,145 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: SIZES.radius_md,
-    paddingHorizontal: 14,
-    height: 48,
+    justifyContent: 'space-between',
+    minHeight: 50,
   },
   input: {
     flex: 1,
-    fontSize: SIZES.md,
     color: COLORS.textPrimary,
-    ...FONTS.regular,
+    ...FONTS.medium,
   },
   inputDivider: {
-    height: 4,
+    height: 1,
+    backgroundColor: COLORS.borderLight,
   },
   rideTypesScroll: {
-    marginTop: 16,
-    marginBottom: 12,
+    marginTop: 18,
   },
   rideTypes: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 12,
+    paddingRight: 12,
   },
   rideTypeCard: {
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: SIZES.radius_lg,
+    width: 132,
     backgroundColor: COLORS.background,
-    borderWidth: 1.5,
+    borderRadius: SIZES.radius_lg,
+    padding: 14,
+    borderWidth: 1,
     borderColor: 'transparent',
-    minWidth: 100,
   },
   rideTypeCardActive: {
     borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary + '08',
+    backgroundColor: COLORS.surface,
   },
   rideTypeIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
+    marginBottom: 12,
   },
   rideTypeLabel: {
-    fontSize: SIZES.xs,
     color: COLORS.textSecondary,
-    ...FONTS.medium,
-  },
-  rideTypeLabelActive: {
-    color: COLORS.primary,
     ...FONTS.semiBold,
   },
+  rideTypeLabelActive: {
+    color: COLORS.textPrimary,
+  },
   savingsBadge: {
-    backgroundColor: COLORS.success + '15',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: SIZES.radius_full,
-    marginTop: 4,
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    borderRadius: 999,
+    backgroundColor: `${COLORS.success}18`,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
   savingsText: {
-    fontSize: 9,
     color: COLORS.success,
-    ...FONTS.bold,
+    fontSize: SIZES.xs,
+    ...FONTS.semiBold,
+  },
+  strategyCard: {
+    backgroundColor: '#F5F8FF',
+    borderRadius: SIZES.radius_lg,
+    padding: 14,
+    marginTop: 16,
+  },
+  strategyTitle: {
+    color: COLORS.textPrimary,
+    marginBottom: 4,
+    ...FONTS.semiBold,
+  },
+  strategyText: {
+    color: COLORS.textSecondary,
+    lineHeight: 20,
+    ...FONTS.regular,
   },
   quickPlaces: {
-    gap: 2,
+    marginTop: 16,
+    gap: 10,
   },
   quickPlace: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    gap: 12,
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radius_lg,
+    padding: 12,
   },
   quickPlaceIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.primary + '10',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: `${COLORS.primary}14`,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
   },
   quickPlaceInfo: {
     flex: 1,
   },
   quickPlaceLabel: {
-    fontSize: SIZES.md,
     color: COLORS.textPrimary,
     ...FONTS.semiBold,
   },
   quickPlaceAddress: {
-    fontSize: SIZES.sm,
-    color: COLORS.textTertiary,
+    color: COLORS.textSecondary,
+    marginTop: 2,
     ...FONTS.regular,
   },
+  errorText: {
+    color: COLORS.error,
+    marginTop: 12,
+    ...FONTS.medium,
+  },
   findButton: {
+    marginTop: 18,
+    backgroundColor: COLORS.primary,
+    borderRadius: SIZES.radius_lg,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.primary,
-    paddingVertical: 16,
-    borderRadius: SIZES.radius_lg,
-    marginTop: 12,
-    gap: 8,
-    ...SHADOWS.medium,
+    gap: 10,
   },
   findButtonText: {
     color: COLORS.textInverse,
-    fontSize: SIZES.xl,
+    fontSize: SIZES.lg,
     ...FONTS.semiBold,
   },
   safetyBadge: {
+    marginTop: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-    gap: 6,
+    gap: 8,
   },
   safetyText: {
-    fontSize: SIZES.xs,
-    color: COLORS.textTertiary,
-    ...FONTS.regular,
+    flex: 1,
+    color: COLORS.textSecondary,
+    fontSize: SIZES.sm,
+    ...FONTS.medium,
   },
 });

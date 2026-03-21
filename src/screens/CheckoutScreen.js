@@ -1,42 +1,62 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
+  ActivityIndicator,
   ScrollView,
-  TouchableOpacity,
+  StyleSheet,
   Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import {
   ArrowLeft,
-  CreditCard,
-  Shield,
-  Check,
-  ChevronRight,
   Car,
-  MapPin,
+  Check,
   Clock,
-  Users,
+  CreditCard,
+  MapPin,
   Percent,
-  Wallet,
+  Shield,
+  Users,
 } from 'lucide-react-native';
-import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
+import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
+import { USER_PROFILE } from '../constants/data';
+import { useRide } from '../context/RideContext';
 
 export default function CheckoutScreen({ navigation }) {
+  const {
+    createBooking,
+    error,
+    loading,
+    quote,
+    refreshQuote,
+    rideRequest,
+    selectedMatch,
+    selectedVehicle,
+  } = useRide();
   const [insurance, setInsurance] = useState(true);
   const [midTripPickup, setMidTripPickup] = useState(true);
   const [selectedPayment, setSelectedPayment] = useState('upi');
 
-  const paymentMethods = [
-    { id: 'upi', label: 'GPay - shubham@oksbi', icon: '💳', type: 'UPI' },
-    { id: 'card', label: 'HDFC •••• 4589', icon: '💳', type: 'Card' },
-    { id: 'wallet', label: 'Paytm Wallet', icon: '👛', type: 'Wallet' },
-    { id: 'cash', label: 'Cash', icon: '💵', type: 'Cash' },
-  ];
+  useEffect(() => {
+    refreshQuote({
+      insurance,
+      allowMidTripPickup: midTripPickup,
+    });
+  }, [insurance, midTripPickup, refreshQuote]);
+
+  const paymentMethods = USER_PROFILE.paymentMethods.map((method) => ({
+    id: method.type.toLowerCase(),
+    label: method.label,
+    type: method.type,
+    icon: method.type === 'UPI' ? 'UPI' : method.type,
+  }));
+
+  const breakdown = quote?.breakdown;
+  const totals = quote?.totals;
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <ArrowLeft size={22} color={COLORS.textPrimary} />
@@ -46,7 +66,6 @@ export default function CheckoutScreen({ navigation }) {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Route Card */}
         <View style={styles.routeCard}>
           <View style={styles.routeRow}>
             <View style={styles.routeDots}>
@@ -55,83 +74,96 @@ export default function CheckoutScreen({ navigation }) {
               <View style={styles.redDot} />
             </View>
             <View style={styles.routeTexts}>
-              <Text style={styles.routeLocation}>Connaught Place, New Delhi</Text>
-              <Text style={styles.routeLocation}>Akshardham Temple, Delhi</Text>
+              <Text style={styles.routeLocation}>{rideRequest?.pickup}</Text>
+              <Text style={styles.routeLocation}>{rideRequest?.dropoff}</Text>
             </View>
           </View>
           <View style={styles.routeMeta}>
             <View style={styles.metaItem}>
               <MapPin size={14} color={COLORS.textTertiary} />
-              <Text style={styles.metaText}>15 km</Text>
+              <Text style={styles.metaText}>{rideRequest?.distanceKm} km</Text>
             </View>
             <View style={styles.metaItem}>
               <Clock size={14} color={COLORS.textTertiary} />
-              <Text style={styles.metaText}>~35 min</Text>
+              <Text style={styles.metaText}>~{rideRequest?.durationMinutes} min</Text>
             </View>
             <View style={styles.metaItem}>
               <Users size={14} color={COLORS.success} />
-              <Text style={[styles.metaText, { color: COLORS.success }]}>Shared</Text>
+              <Text style={[styles.metaText, { color: COLORS.success }]}>
+                {rideRequest?.rideType === 'solo' ? 'Solo' : 'Shared'}
+              </Text>
             </View>
           </View>
         </View>
 
-        {/* Vehicle Card */}
         <View style={styles.sectionCard}>
           <View style={styles.vehicleRow}>
             <View style={styles.vehicleIcon}>
               <Car size={24} color={COLORS.primary} />
             </View>
             <View style={styles.vehicleInfo}>
-              <Text style={styles.vehicleName}>Maruti Suzuki Swift</Text>
-              <Text style={styles.vehicleType}>Economy • Rajesh K. ⭐ 4.9</Text>
+              <Text style={styles.vehicleName}>{selectedVehicle?.name}</Text>
+              <Text style={styles.vehicleType}>
+                {selectedVehicle?.type} • {selectedVehicle?.driver?.name} • overlap {selectedMatch?.overlap}%
+              </Text>
             </View>
-            <Text style={styles.vehicleETA}>3 min</Text>
+            <Text style={styles.vehicleETA}>{selectedVehicle?.eta}</Text>
           </View>
         </View>
 
-        {/* Fare Breakdown */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Fare Breakdown</Text>
 
-          <View style={styles.fareRow}>
-            <Text style={styles.fareLabel}>Base fare (15 km × ₹8/km)</Text>
-            <Text style={styles.fareValue}>₹120</Text>
-          </View>
-          <View style={styles.fareRow}>
-            <Text style={styles.fareLabel}>Distance charge</Text>
-            <Text style={styles.fareValue}>₹180</Text>
-          </View>
-          <View style={styles.fareRow}>
-            <Text style={styles.fareLabel}>Platform fee</Text>
-            <Text style={styles.fareValue}>₹20</Text>
-          </View>
-
-          <View style={styles.savingsRow}>
-            <Percent size={14} color={COLORS.success} />
-            <Text style={styles.savingsLabel}>Shared ride discount</Text>
-            <Text style={styles.savingsValue}>-₹40</Text>
-          </View>
-
-          {insurance && (
-            <View style={styles.fareRow}>
-              <Text style={styles.fareLabel}>Smart Insurance</Text>
-              <Text style={styles.fareValue}>₹15</Text>
+          {breakdown ? (
+            <>
+              <View style={styles.fareRow}>
+                <Text style={styles.fareLabel}>Base fare</Text>
+                <Text style={styles.fareValue}>₹{breakdown.baseFare}</Text>
+              </View>
+              <View style={styles.fareRow}>
+                <Text style={styles.fareLabel}>Distance charge</Text>
+                <Text style={styles.fareValue}>₹{breakdown.distanceFare}</Text>
+              </View>
+              <View style={styles.fareRow}>
+                <Text style={styles.fareLabel}>Platform fee</Text>
+                <Text style={styles.fareValue}>₹{breakdown.platformFee}</Text>
+              </View>
+              <View style={styles.savingsRow}>
+                <Percent size={14} color={COLORS.success} />
+                <Text style={styles.savingsLabel}>Shared ride discount</Text>
+                <Text style={styles.savingsValue}>-₹{breakdown.poolingDiscount}</Text>
+              </View>
+              {midTripPickup ? (
+                <View style={styles.savingsRow}>
+                  <Users size={14} color={COLORS.success} />
+                  <Text style={styles.savingsLabel}>Mid-trip pickup discount</Text>
+                  <Text style={styles.savingsValue}>-₹{breakdown.midTripPickupDiscount}</Text>
+                </View>
+              ) : null}
+              {insurance ? (
+                <View style={styles.fareRow}>
+                  <Text style={styles.fareLabel}>Smart Insurance</Text>
+                  <Text style={styles.fareValue}>₹{breakdown.insuranceFee}</Text>
+                </View>
+              ) : null}
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Total</Text>
+                <Text style={styles.totalValue}>₹{totals.total}</Text>
+              </View>
+              <View style={styles.savingsBadge}>
+                <Text style={styles.savingsBadgeText}>
+                  You save ₹{totals.estimatedSavings} compared to solo fare ₹{totals.soloReferenceFare}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <View style={styles.quoteLoading}>
+              <ActivityIndicator color={COLORS.primary} />
+              <Text style={styles.quoteLoadingText}>Calculating fare quote...</Text>
             </View>
           )}
-
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>₹{insurance ? 295 : 280}</Text>
-          </View>
-
-          <View style={styles.savingsBadge}>
-            <Text style={styles.savingsBadgeText}>
-              🎉 You save ₹{insurance ? 205 : 220} compared to solo ride (₹500)
-            </Text>
-          </View>
         </View>
 
-        {/* Add-ons */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Add-ons</Text>
 
@@ -146,32 +178,30 @@ export default function CheckoutScreen({ navigation }) {
             <Switch
               value={insurance}
               onValueChange={setInsurance}
-              trackColor={{ true: COLORS.primary + '40', false: COLORS.border }}
+              trackColor={{ true: `${COLORS.primary}40`, false: COLORS.border }}
               thumbColor={insurance ? COLORS.primary : COLORS.textTertiary}
             />
           </View>
 
-          <View style={[styles.toggleRow, { borderTopWidth: 1, borderTopColor: COLORS.borderLight, paddingTop: 14 }]}>
+          <View style={[styles.toggleRow, styles.toggleDivider]}>
             <View style={styles.toggleInfo}>
               <Users size={18} color={COLORS.success} />
               <View>
                 <Text style={styles.toggleLabel}>Allow mid-trip pickups</Text>
-                <Text style={styles.toggleDesc}>Get extra 5% discount if someone joins</Text>
+                <Text style={styles.toggleDesc}>If another rider joins, your fare drops further</Text>
               </View>
             </View>
             <Switch
               value={midTripPickup}
               onValueChange={setMidTripPickup}
-              trackColor={{ true: COLORS.success + '40', false: COLORS.border }}
+              trackColor={{ true: `${COLORS.success}40`, false: COLORS.border }}
               thumbColor={midTripPickup ? COLORS.success : COLORS.textTertiary}
             />
           </View>
         </View>
 
-        {/* Payment Method */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Payment Method</Text>
-
           {paymentMethods.map((method) => (
             <TouchableOpacity
               key={method.id}
@@ -181,35 +211,52 @@ export default function CheckoutScreen({ navigation }) {
               ]}
               onPress={() => setSelectedPayment(method.id)}
             >
-              <Text style={styles.paymentIcon}>{method.icon}</Text>
+              <View style={styles.paymentBadge}>
+                <Text style={styles.paymentBadgeText}>{method.icon}</Text>
+              </View>
               <View style={styles.paymentInfo}>
                 <Text style={styles.paymentLabel}>{method.label}</Text>
                 <Text style={styles.paymentType}>{method.type}</Text>
               </View>
-              {selectedPayment === method.id && (
+              {selectedPayment === method.id ? (
                 <View style={styles.checkCircle}>
                   <Check size={14} color={COLORS.textInverse} />
                 </View>
-              )}
+              ) : null}
             </TouchableOpacity>
           ))}
         </View>
 
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Bottom Action */}
       <View style={styles.bottomAction}>
         <View style={styles.totalInfo}>
           <Text style={styles.payLabel}>Total</Text>
-          <Text style={styles.payAmount}>₹{insurance ? 295 : 280}</Text>
+          <Text style={styles.payAmount}>{totals ? `₹${totals.total}` : '...'}</Text>
         </View>
         <TouchableOpacity
           style={styles.payButton}
-          onPress={() => navigation.navigate('ActiveTrip')}
+          disabled={loading || !quote}
+          onPress={async () => {
+            await createBooking({
+              insurance,
+              allowMidTripPickup: midTripPickup,
+              paymentMethod: selectedPayment,
+            });
+            navigation.navigate('ActiveTrip');
+          }}
         >
-          <CreditCard size={20} color={COLORS.textInverse} />
-          <Text style={styles.payButtonText}>Book & Pay</Text>
+          {loading ? (
+            <ActivityIndicator color={COLORS.textInverse} />
+          ) : (
+            <>
+              <CreditCard size={20} color={COLORS.textInverse} />
+              <Text style={styles.payButtonText}>Book & Pay</Text>
+            </>
+          )}
         </TouchableOpacity>
       </View>
     </View>
@@ -258,12 +305,10 @@ const styles = StyleSheet.create({
   },
   routeRow: {
     flexDirection: 'row',
-    gap: 12,
   },
   routeDots: {
     alignItems: 'center',
-    paddingTop: 4,
-    gap: 2,
+    marginRight: 12,
   },
   greenDot: {
     width: 10,
@@ -271,42 +316,40 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: COLORS.success,
   },
-  dottedLine: {
-    width: 2,
-    height: 20,
-    backgroundColor: COLORS.border,
-  },
   redDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
     backgroundColor: COLORS.error,
   },
+  dottedLine: {
+    width: 2,
+    flex: 1,
+    borderStyle: 'dashed',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginVertical: 6,
+  },
   routeTexts: {
     flex: 1,
-    gap: 14,
+    gap: 18,
   },
   routeLocation: {
-    fontSize: SIZES.md,
     color: COLORS.textPrimary,
     ...FONTS.medium,
   },
   routeMeta: {
     flexDirection: 'row',
-    gap: 16,
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.borderLight,
+    marginTop: 18,
+    gap: 18,
   },
   metaItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
   metaText: {
-    fontSize: SIZES.sm,
-    color: COLORS.textTertiary,
+    color: COLORS.textSecondary,
     ...FONTS.medium,
   },
   sectionCard: {
@@ -316,111 +359,115 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     ...SHADOWS.small,
   },
-  sectionTitle: {
-    fontSize: SIZES.lg,
-    color: COLORS.textPrimary,
-    ...FONTS.bold,
-    marginBottom: 14,
-  },
   vehicleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
   },
   vehicleIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: SIZES.radius_md,
-    backgroundColor: COLORS.primary + '10',
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: `${COLORS.primary}16`,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
   },
   vehicleInfo: {
     flex: 1,
   },
   vehicleName: {
-    fontSize: SIZES.lg,
     color: COLORS.textPrimary,
     ...FONTS.semiBold,
   },
   vehicleType: {
-    fontSize: SIZES.sm,
-    color: COLORS.textTertiary,
-    marginTop: 2,
+    color: COLORS.textSecondary,
+    marginTop: 4,
     ...FONTS.regular,
   },
   vehicleETA: {
-    fontSize: SIZES.md,
     color: COLORS.primary,
+    ...FONTS.semiBold,
+  },
+  sectionTitle: {
+    color: COLORS.textPrimary,
+    marginBottom: 14,
     ...FONTS.semiBold,
   },
   fareRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    marginBottom: 12,
   },
   fareLabel: {
-    fontSize: SIZES.md,
     color: COLORS.textSecondary,
     ...FONTS.regular,
   },
   fareValue: {
-    fontSize: SIZES.md,
     color: COLORS.textPrimary,
-    ...FONTS.semiBold,
+    ...FONTS.medium,
   },
   savingsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    gap: 6,
+    gap: 8,
+    marginBottom: 12,
   },
   savingsLabel: {
     flex: 1,
-    fontSize: SIZES.md,
     color: COLORS.success,
     ...FONTS.medium,
   },
   savingsValue: {
-    fontSize: SIZES.md,
     color: COLORS.success,
-    ...FONTS.bold,
+    ...FONTS.semiBold,
   },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingTop: 12,
-    marginTop: 8,
-    borderTopWidth: 1.5,
-    borderTopColor: COLORS.border,
+    marginTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
   },
   totalLabel: {
-    fontSize: SIZES.xl,
     color: COLORS.textPrimary,
-    ...FONTS.bold,
+    fontSize: SIZES.lg,
+    ...FONTS.semiBold,
   },
   totalValue: {
-    fontSize: SIZES.xxl,
-    color: COLORS.primary,
+    color: COLORS.textPrimary,
+    fontSize: SIZES.lg,
     ...FONTS.bold,
   },
   savingsBadge: {
-    backgroundColor: COLORS.success + '10',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: SIZES.radius_md,
-    marginTop: 12,
+    marginTop: 14,
+    borderRadius: SIZES.radius_lg,
+    backgroundColor: `${COLORS.success}12`,
+    padding: 12,
   },
   savingsBadgeText: {
-    fontSize: SIZES.sm,
     color: COLORS.success,
     ...FONTS.medium,
-    textAlign: 'center',
+  },
+  quoteLoading: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  quoteLoadingText: {
+    color: COLORS.textSecondary,
+    marginTop: 10,
+    ...FONTS.medium,
   },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  toggleDivider: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+    paddingTop: 14,
+    marginTop: 14,
   },
   toggleInfo: {
     flexDirection: 'row',
@@ -429,45 +476,52 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   toggleLabel: {
-    fontSize: SIZES.md,
     color: COLORS.textPrimary,
     ...FONTS.semiBold,
   },
   toggleDesc: {
-    fontSize: SIZES.xs,
-    color: COLORS.textTertiary,
-    marginTop: 2,
+    color: COLORS.textSecondary,
+    marginTop: 4,
     ...FONTS.regular,
   },
   paymentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 14,
     borderRadius: SIZES.radius_lg,
-    marginBottom: 6,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: 'transparent',
+    paddingHorizontal: 12,
+    marginBottom: 10,
+    backgroundColor: COLORS.background,
   },
   paymentRowActive: {
+    borderWidth: 1,
     borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary + '05',
+    backgroundColor: '#F8FBFF',
   },
-  paymentIcon: {
-    fontSize: 22,
+  paymentBadge: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: COLORS.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  paymentBadgeText: {
+    color: COLORS.textPrimary,
+    fontSize: SIZES.xs,
+    ...FONTS.bold,
   },
   paymentInfo: {
     flex: 1,
   },
   paymentLabel: {
-    fontSize: SIZES.md,
     color: COLORS.textPrimary,
     ...FONTS.medium,
   },
   paymentType: {
-    fontSize: SIZES.xs,
-    color: COLORS.textTertiary,
+    color: COLORS.textSecondary,
+    marginTop: 2,
     ...FONTS.regular,
   },
   checkCircle: {
@@ -478,47 +532,46 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  errorText: {
+    color: COLORS.error,
+    marginBottom: 12,
+    ...FONTS.medium,
+  },
   bottomAction: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: 20,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
     paddingVertical: 16,
-    paddingBottom: 36,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.borderLight,
+    backgroundColor: COLORS.surface,
     ...SHADOWS.large,
   },
   totalInfo: {
     flex: 1,
   },
   payLabel: {
-    fontSize: SIZES.sm,
-    color: COLORS.textTertiary,
-    ...FONTS.regular,
+    color: COLORS.textSecondary,
+    ...FONTS.medium,
   },
   payAmount: {
-    fontSize: SIZES.xxxl,
     color: COLORS.textPrimary,
+    marginTop: 4,
+    fontSize: SIZES.xxl,
     ...FONTS.bold,
   },
   payButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    minWidth: 150,
     backgroundColor: COLORS.primary,
-    paddingHorizontal: 28,
+    paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: SIZES.radius_lg,
-    gap: 8,
-    ...SHADOWS.medium,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
   },
   payButtonText: {
     color: COLORS.textInverse,
-    fontSize: SIZES.lg,
     ...FONTS.semiBold,
   },
 });

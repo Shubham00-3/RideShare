@@ -1,81 +1,82 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
   ScrollView,
+  StyleSheet,
+  Text,
   TouchableOpacity,
-  Dimensions,
+  View,
 } from 'react-native';
 import {
   ArrowLeft,
-  Filter,
-  Star,
-  MapPin,
-  Clock,
-  Users,
-  Fuel,
-  Leaf,
   Car,
+  Clock,
+  Filter,
+  Leaf,
+  MapPin,
+  Star,
+  Users,
 } from 'lucide-react-native';
-import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
-import { MOCK_VEHICLES, VEHICLE_TYPES } from '../constants/data';
+import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
+import { useRide } from '../context/RideContext';
 
-const { width } = Dimensions.get('window');
+const FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'economy', label: 'Economy' },
+  { id: 'comfort', label: 'Comfort' },
+  { id: 'eco', label: 'ECO' },
+];
 
 export default function VehicleSelectScreen({ navigation }) {
+  const { chooseVehicle, rideRequest, selectedMatch, selectedVehicle } = useRide();
   const [selectedFilter, setSelectedFilter] = useState('all');
-  const [selectedVehicle, setSelectedVehicle] = useState(null);
 
-  const filteredVehicles =
-    selectedFilter === 'all'
-      ? MOCK_VEHICLES
-      : MOCK_VEHICLES.filter((v) => v.category === selectedFilter);
+  const vehicles = selectedMatch?.vehicles ?? [];
+  const filteredVehicles = useMemo(() => {
+    if (selectedFilter === 'all') {
+      return vehicles;
+    }
+
+    return vehicles.filter((vehicle) => vehicle.category === selectedFilter);
+  }, [selectedFilter, vehicles]);
 
   return (
     <View style={styles.container}>
-      {/* Map Top Section */}
       <View style={styles.mapSection}>
         <View style={styles.mapPlaceholder}>
           <View style={styles.mapRoad} />
           <View style={styles.mapRoad2} />
-          {/* Route Line */}
           <View style={styles.routeLine} />
-          {/* Driver Icon */}
           <View style={styles.driverIcon}>
             <Car size={16} color={COLORS.primary} />
           </View>
         </View>
 
-        {/* Top Bar */}
         <View style={styles.topBar}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <ArrowLeft size={20} color={COLORS.textPrimary} />
           </TouchableOpacity>
           <View style={styles.routeBadge}>
             <MapPin size={14} color={COLORS.primary} />
-            <Text style={styles.routeBadgeText}>CP → Akshardham</Text>
+            <Text style={styles.routeBadgeText}>
+              {rideRequest ? `${rideRequest.pickup.split(',')[0]} -> ${rideRequest.dropoff.split(',')[0]}` : 'Route'}
+            </Text>
           </View>
-          <TouchableOpacity style={styles.filterBtn}>
+          <View style={styles.filterBtn}>
             <Filter size={18} color={COLORS.primary} />
-          </TouchableOpacity>
+          </View>
         </View>
       </View>
 
-      {/* Bottom Content */}
       <View style={styles.bottomContent}>
         <View style={styles.sheetHandle} />
+        <Text style={styles.sectionTitle}>Choose a driver and vehicle</Text>
+        <Text style={styles.sectionSubtitle}>
+          Each option is generated from the matched corridor candidate and priced for pooled earnings.
+        </Text>
 
-        <Text style={styles.sectionTitle}>Choose your ride</Text>
-
-        {/* Filter Chips */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filtersScroll}
-        >
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtersScroll}>
           <View style={styles.filters}>
-            {VEHICLE_TYPES.map((type) => (
+            {FILTERS.map((type) => (
               <TouchableOpacity
                 key={type.id}
                 style={[
@@ -97,98 +98,81 @@ export default function VehicleSelectScreen({ navigation }) {
           </View>
         </ScrollView>
 
-        {/* Vehicle Cards */}
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          style={styles.vehicleList}
-        >
-          {filteredVehicles.map((vehicle) => (
-            <TouchableOpacity
-              key={vehicle.id}
-              style={[
-                styles.vehicleCard,
-                selectedVehicle === vehicle.id && styles.vehicleCardSelected,
-              ]}
-              onPress={() => setSelectedVehicle(vehicle.id)}
-            >
-              {/* Vehicle Image Placeholder */}
-              <View style={styles.vehicleImageContainer}>
-                <View style={styles.vehicleImagePlaceholder}>
-                  <Car size={36} color={COLORS.primary} />
-                </View>
-                {vehicle.category === 'eco' && (
-                  <View style={styles.ecoBadge}>
-                    <Leaf size={10} color={COLORS.success} />
-                    <Text style={styles.ecoText}>EV</Text>
-                  </View>
-                )}
-              </View>
+        <ScrollView showsVerticalScrollIndicator={false} style={styles.vehicleList}>
+          {filteredVehicles.map((vehicle) => {
+            const isSelected = selectedVehicle?.providerVehicleId === vehicle.providerVehicleId;
 
-              {/* Vehicle Info */}
-              <View style={styles.vehicleInfo}>
-                <Text style={styles.vehicleName}>{vehicle.name}</Text>
-                <Text style={styles.vehicleType}>{vehicle.type}</Text>
-
-                <View style={styles.vehicleMetrics}>
-                  <View style={styles.metricItem}>
-                    <MapPin size={12} color={COLORS.textTertiary} />
-                    <Text style={styles.metricText}>{vehicle.distance}</Text>
+            return (
+              <TouchableOpacity
+                key={vehicle.providerVehicleId}
+                style={[styles.vehicleCard, isSelected && styles.vehicleCardSelected]}
+                onPress={() => chooseVehicle(vehicle)}
+              >
+                <View style={styles.vehicleImageContainer}>
+                  <View style={styles.vehicleImagePlaceholder}>
+                    <Car size={36} color={COLORS.primary} />
                   </View>
-                  <View style={styles.metricItem}>
-                    <Clock size={12} color={COLORS.textTertiary} />
-                    <Text style={styles.metricText}>{vehicle.eta}</Text>
-                  </View>
-                  <View style={styles.metricItem}>
-                    <Users size={12} color={COLORS.textTertiary} />
-                    <Text style={styles.metricText}>{vehicle.seats} seats</Text>
-                  </View>
+                  {vehicle.category === 'eco' ? (
+                    <View style={styles.ecoBadge}>
+                      <Leaf size={10} color={COLORS.success} />
+                      <Text style={styles.ecoText}>EV</Text>
+                    </View>
+                  ) : null}
                 </View>
 
-                {/* Driver Info */}
-                <View style={styles.driverRow}>
-                  <View style={styles.driverAvatar}>
-                    <Text style={styles.driverAvatarText}>
-                      {vehicle.driver.name.charAt(0)}
-                    </Text>
-                  </View>
-                  <Text style={styles.driverName}>{vehicle.driver.name}</Text>
-                  <Star size={12} color={COLORS.star} fill={COLORS.star} />
-                  <Text style={styles.driverRating}>{vehicle.driver.rating}</Text>
-                  <Text style={styles.driverTrips}>
-                    ({vehicle.driver.trips} trips)
-                  </Text>
-                </View>
-              </View>
+                <View style={styles.vehicleInfo}>
+                  <Text style={styles.vehicleName}>{vehicle.name}</Text>
+                  <Text style={styles.vehicleType}>{vehicle.type}</Text>
 
-              {/* Fare */}
-              <View style={styles.fareContainer}>
-                <Text style={styles.fareAmount}>{vehicle.fare}</Text>
-                <Text style={styles.fareRate}>{vehicle.farePerKm}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+                  <View style={styles.vehicleMetrics}>
+                    <View style={styles.metricItem}>
+                      <MapPin size={12} color={COLORS.textTertiary} />
+                      <Text style={styles.metricText}>{vehicle.distance}</Text>
+                    </View>
+                    <View style={styles.metricItem}>
+                      <Clock size={12} color={COLORS.textTertiary} />
+                      <Text style={styles.metricText}>{vehicle.eta}</Text>
+                    </View>
+                    <View style={styles.metricItem}>
+                      <Users size={12} color={COLORS.textTertiary} />
+                      <Text style={styles.metricText}>{vehicle.seats} seats</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.driverRow}>
+                    <View style={styles.driverAvatar}>
+                      <Text style={styles.driverAvatarText}>{vehicle.driver.name.charAt(0)}</Text>
+                    </View>
+                    <Text style={styles.driverName}>{vehicle.driver.name}</Text>
+                    <Star size={12} color={COLORS.star} fill={COLORS.star} />
+                    <Text style={styles.driverRating}>{vehicle.driver.rating}</Text>
+                    <Text style={styles.driverTrips}>({vehicle.driver.trips} trips)</Text>
+                  </View>
+                </View>
+
+                <View style={styles.fareContainer}>
+                  <Text style={styles.fareAmount}>{vehicle.fare}</Text>
+                  <Text style={styles.fareRate}>{vehicle.farePerKm}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
 
           <View style={{ height: 100 }} />
         </ScrollView>
       </View>
 
-      {/* Bottom Action */}
-      {selectedVehicle && (
+      {selectedVehicle ? (
         <View style={styles.bottomAction}>
           <View style={styles.selectedInfo}>
             <Text style={styles.selectedLabel}>Selected</Text>
-            <Text style={styles.selectedName}>
-              {MOCK_VEHICLES.find((v) => v.id === selectedVehicle)?.name}
-            </Text>
+            <Text style={styles.selectedName}>{selectedVehicle.name}</Text>
           </View>
-          <TouchableOpacity
-            style={styles.bookButton}
-            onPress={() => navigation.navigate('Checkout')}
-          >
-            <Text style={styles.bookButtonText}>Book Ride</Text>
+          <TouchableOpacity style={styles.bookButton} onPress={() => navigation.navigate('Checkout')}>
+            <Text style={styles.bookButtonText}>Review quote</Text>
           </TouchableOpacity>
         </View>
-      )}
+      ) : null}
     </View>
   );
 }
@@ -262,21 +246,18 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOWS.medium,
   },
   routeBadge: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: SIZES.radius_full,
-    gap: 6,
-    ...SHADOWS.medium,
   },
   routeBadgeText: {
-    fontSize: SIZES.md,
     color: COLORS.textPrimary,
     ...FONTS.semiBold,
   },
@@ -287,57 +268,58 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOWS.medium,
   },
   bottomContent: {
     flex: 1,
+    marginTop: -20,
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    marginTop: -20,
-    paddingTop: 12,
     paddingHorizontal: 16,
+    paddingTop: 14,
   },
   sheetHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
+    width: 42,
+    height: 5,
+    borderRadius: 999,
     backgroundColor: COLORS.border,
     alignSelf: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   sectionTitle: {
-    fontSize: SIZES.xxl,
     color: COLORS.textPrimary,
+    fontSize: SIZES.xxl,
     ...FONTS.bold,
-    marginBottom: 12,
+  },
+  sectionSubtitle: {
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    marginBottom: 14,
+    ...FONTS.regular,
   },
   filtersScroll: {
     marginBottom: 14,
   },
   filters: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
+    paddingRight: 8,
   },
   filterChip: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: SIZES.radius_full,
+    borderRadius: 999,
     backgroundColor: COLORS.background,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   filterChipActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+    backgroundColor: `${COLORS.primary}14`,
   },
   filterChipText: {
-    fontSize: SIZES.md,
     color: COLORS.textSecondary,
     ...FONTS.medium,
   },
   filterChipTextActive: {
-    color: COLORS.textInverse,
+    color: COLORS.primary,
     ...FONTS.semiBold,
   },
   vehicleList: {
@@ -345,163 +327,149 @@ const styles = StyleSheet.create({
   },
   vehicleCard: {
     flexDirection: 'row',
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.background,
     borderRadius: SIZES.radius_xl,
     padding: 14,
-    marginBottom: 10,
-    borderWidth: 1.5,
-    borderColor: COLORS.borderLight,
-    ...SHADOWS.small,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   vehicleCardSelected: {
     borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary + '05',
+    backgroundColor: '#F8FBFF',
   },
   vehicleImageContainer: {
-    position: 'relative',
-    marginRight: 12,
+    marginRight: 14,
+    alignItems: 'center',
   },
   vehicleImagePlaceholder: {
-    width: 70,
-    height: 70,
-    borderRadius: SIZES.radius_lg,
-    backgroundColor: COLORS.primary + '08',
+    width: 72,
+    height: 72,
+    borderRadius: 18,
+    backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   ecoBadge: {
-    position: 'absolute',
-    bottom: -4,
-    right: -4,
+    marginTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.success + '20',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: SIZES.radius_full,
-    gap: 2,
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: `${COLORS.success}18`,
   },
   ecoText: {
-    fontSize: 9,
     color: COLORS.success,
-    ...FONTS.bold,
+    fontSize: SIZES.xs,
+    ...FONTS.semiBold,
   },
   vehicleInfo: {
     flex: 1,
   },
   vehicleName: {
-    fontSize: SIZES.lg,
     color: COLORS.textPrimary,
     ...FONTS.semiBold,
   },
   vehicleType: {
-    fontSize: SIZES.sm,
-    color: COLORS.textTertiary,
+    color: COLORS.textSecondary,
+    marginTop: 4,
     ...FONTS.regular,
-    marginTop: 1,
   },
   vehicleMetrics: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 6,
+    marginTop: 10,
   },
   metricItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 4,
   },
   metricText: {
+    color: COLORS.textSecondary,
     fontSize: SIZES.xs,
-    color: COLORS.textTertiary,
-    ...FONTS.regular,
+    ...FONTS.medium,
   },
   driverRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: 6,
+    marginTop: 12,
   },
   driverAvatar: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: COLORS.primary + '20',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: `${COLORS.primary}16`,
     alignItems: 'center',
     justifyContent: 'center',
   },
   driverAvatarText: {
-    fontSize: 10,
     color: COLORS.primary,
+    fontSize: SIZES.xs,
     ...FONTS.bold,
   },
   driverName: {
+    color: COLORS.textPrimary,
     fontSize: SIZES.xs,
-    color: COLORS.textSecondary,
     ...FONTS.medium,
   },
   driverRating: {
-    fontSize: SIZES.xs,
     color: COLORS.textSecondary,
-    ...FONTS.semiBold,
+    fontSize: SIZES.xs,
+    ...FONTS.medium,
   },
   driverTrips: {
-    fontSize: SIZES.xs,
     color: COLORS.textTertiary,
-    ...FONTS.regular,
+    fontSize: SIZES.xs,
+    ...FONTS.medium,
   },
   fareContainer: {
     alignItems: 'flex-end',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
   },
   fareAmount: {
-    fontSize: SIZES.xxl,
-    color: COLORS.primary,
+    color: COLORS.textPrimary,
+    fontSize: SIZES.xl,
     ...FONTS.bold,
   },
   fareRate: {
+    color: COLORS.textSecondary,
     fontSize: SIZES.xs,
-    color: COLORS.textTertiary,
-    ...FONTS.regular,
-    marginTop: 2,
+    ...FONTS.medium,
   },
   bottomAction: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: 20,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
     paddingVertical: 16,
-    paddingBottom: 36,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.borderLight,
+    backgroundColor: COLORS.surface,
     ...SHADOWS.large,
   },
   selectedInfo: {
     flex: 1,
   },
   selectedLabel: {
-    fontSize: SIZES.xs,
-    color: COLORS.textTertiary,
-    ...FONTS.regular,
+    color: COLORS.textSecondary,
+    fontSize: SIZES.sm,
+    ...FONTS.medium,
   },
   selectedName: {
-    fontSize: SIZES.lg,
     color: COLORS.textPrimary,
+    marginTop: 4,
     ...FONTS.semiBold,
   },
   bookButton: {
     backgroundColor: COLORS.primary,
-    paddingHorizontal: 32,
+    paddingHorizontal: 18,
     paddingVertical: 14,
     borderRadius: SIZES.radius_lg,
-    ...SHADOWS.medium,
   },
   bookButtonText: {
     color: COLORS.textInverse,
-    fontSize: SIZES.lg,
     ...FONTS.semiBold,
   },
 });

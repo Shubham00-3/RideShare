@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>RideShare Connect AI Handoff</title>
+    <style>
+      :root {
+        --ink: #172033;
+        --muted: #536179;
+        --line: #dbe3ef;
+        --brand: #0a84ff;
+        --soft: #eef6ff;
+        --page: #ffffff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: var(--page);
+        line-height: 1.5;
+      }
+      .page {
+        padding: 40px 56px 56px;
+      }
+      .hero {
+        border: 1px solid var(--line);
+        background: linear-gradient(135deg, #0a84ff, #52a7ff);
+        color: white;
+        padding: 28px 30px;
+        border-radius: 20px;
+        margin-bottom: 28px;
+      }
+      .hero h1 {
+        margin: 0 0 10px;
+        font-size: 34px;
+      }
+      .hero p {
+        margin: 0;
+        font-size: 17px;
+        opacity: 0.95;
+      }
+      h2 {
+        margin: 28px 0 10px;
+        font-size: 22px;
+        color: var(--ink);
+        border-bottom: 2px solid var(--line);
+        padding-bottom: 6px;
+      }
+      h3 {
+        margin: 18px 0 8px;
+        font-size: 16px;
+        color: var(--ink);
+      }
+      p, li {
+        font-size: 13.5px;
+      }
+      ul, ol {
+        margin: 8px 0 12px 20px;
+      }
+      .card {
+        background: #f8fbff;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 16px 18px;
+        margin: 12px 0;
+      }
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      code {
+        background: var(--soft);
+        border: 1px solid var(--line);
+        padding: 1px 6px;
+        border-radius: 6px;
+        font-size: 12px;
+      }
+      .footer-note {
+        margin-top: 28px;
+        padding: 14px 16px;
+        background: #fff8e8;
+        border: 1px solid #efd8a7;
+        border-radius: 12px;
+        font-size: 13px;
+      }
+      @media print {
+        .page {
+          padding: 24px 28px 36px;
+        }
+        h2 {
+          break-after: avoid;
+        }
+        .card, .two-col {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <h1>RideShare Connect AI Handoff</h1>
+        <p>
+          High-level technical and product context for any engineer or AI system
+          continuing work on this repository.
+        </p>
+      </section>
+
+      <section>
+        <h2>1. What This Project Is</h2>
+        <p>
+          RideShare Connect is a mobile-first smart carpooling platform for India.
+          Its central idea is to match riders with partially overlapping routes,
+          not only identical destinations. The repo now contains a real MVP
+          foundation: Expo mobile app, Express backend, PostgreSQL schema, seed
+          data, and a connected rider booking flow.
+        </p>
+      </section>
+
+      <section class="two-col">
+        <div class="card">
+          <h3>Passenger value</h3>
+          <ul>
+            <li>Partial-route ride matching</li>
+            <li>Lower shared fares</li>
+            <li>Optional mid-trip pickup for extra savings</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Driver value</h3>
+          <ul>
+            <li>Better shared-ride economics</li>
+            <li>Foundation for return-trip monetization</li>
+            <li>Lower commission model</li>
+          </ul>
+        </div>
+      </section>
+
+      <section>
+        <h2>2. Current Stack</h2>
+        <div class="two-col">
+          <div class="card">
+            <h3>Mobile</h3>
+            <ul>
+              <li>Expo SDK 55</li>
+              <li>React 19</li>
+              <li>React Native 0.83</li>
+              <li>React Navigation</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Backend</h3>
+            <ul>
+              <li>Node.js + Express</li>
+              <li><code>pg</code> for PostgreSQL</li>
+              <li>dotenv + cors</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>3. Repository Shape</h2>
+        <div class="card">
+          <ul>
+            <li><code>src/screens/</code> contains the mobile UI flow</li>
+            <li><code>src/context/RideContext.js</code> manages ride flow state</li>
+            <li><code>src/services/api.js</code> calls backend endpoints</li>
+            <li><code>backend/src/server.js</code> exposes API routes</li>
+            <li><code>backend/src/services/</code> holds matching and booking logic</li>
+            <li><code>backend/src/db/schema.sql</code> defines tables</li>
+            <li><code>backend/src/db/seed.sql</code> seeds MVP testing data</li>
+          </ul>
+        </div>
+      </section>
+
+      <section>
+        <h2>4. Current Rider Flow</h2>
+        <ol>
+          <li>User passes through a demo phone / OTP login screen.</li>
+          <li>User enters pickup, dropoff, and ride type.</li>
+          <li>App calls <code>previewRideMatches()</code>.</li>
+          <li>Backend returns corridor-compatible matches.</li>
+          <li>User chooses a match and then a vehicle option.</li>
+          <li>App requests a quote from <code>/api/bookings/quote</code>.</li>
+          <li>User books via <code>/api/bookings</code>.</li>
+          <li>App shows an active trip screen with simulated trip progress.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>5. Matching Logic</h2>
+        <p>
+          The current matching engine is corridor-based MVP logic. It does not
+          yet use a real routing service. The backend:
+        </p>
+        <ul>
+          <li>infers a corridor from text pickup/dropoff</li>
+          <li>loads active trips from PostgreSQL</li>
+          <li>computes route overlap in kilometers</li>
+          <li>penalizes detour time</li>
+          <li>scores candidates and filters weak overlaps</li>
+          <li>returns derived vehicle and fare options</li>
+        </ul>
+        <div class="card">
+          <strong>Seeded corridors:</strong> <code>delhi_cp_noida</code> and
+          <code>gurgaon_cp_central</code>
+        </div>
+      </section>
+
+      <section>
+        <h2>6. API Surface</h2>
+        <div class="card">
+          <ul>
+            <li><code>GET /health</code></li>
+            <li><code>POST /api/ride-requests/preview-match</code></li>
+            <li><code>POST /api/bookings/quote</code></li>
+            <li><code>POST /api/bookings</code></li>
+          </ul>
+        </div>
+      </section>
+
+      <section>
+        <h2>7. Database Model</h2>
+        <div class="card">
+          <ul>
+            <li><code>corridors</code></li>
+            <li><code>users</code></li>
+            <li><code>drivers</code></li>
+            <li><code>vehicles</code></li>
+            <li><code>ride_requests</code></li>
+            <li><code>active_trips</code></li>
+            <li><code>bookings</code></li>
+          </ul>
+        </div>
+      </section>
+
+      <section>
+        <h2>8. What Is Actually Working</h2>
+        <ul>
+          <li>Android export succeeds</li>
+          <li>iOS export succeeds</li>
+          <li>Web export succeeds</li>
+          <li>Backend health endpoint works</li>
+          <li>Postgres-backed match preview works</li>
+          <li>Quote endpoint works</li>
+          <li>Booking endpoint works</li>
+          <li>Database is seeded with live MVP records</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>9. Biggest Gaps</h2>
+        <div class="two-col">
+          <div class="card">
+            <h3>Still mocked</h3>
+            <ul>
+              <li>OTP / SMS auth</li>
+              <li>Maps and routing engine</li>
+              <li>Payments</li>
+              <li>Realtime updates</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>Still needed</h3>
+            <ul>
+              <li>Persist ride request writes</li>
+              <li>Persist bookings</li>
+              <li>Trip polling / websocket updates</li>
+              <li>Production deployment</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>10. Important Caveats</h2>
+        <ul>
+          <li>
+            The login screen is demo-only. It does not send a real OTP and should
+            not be mistaken for production auth.
+          </li>
+          <li>
+            Expo Go testing was blocked by local network reachability and unstable
+            ngrok tunnel sessions. That is a transport problem, not a core app
+            architecture problem.
+          </li>
+          <li>
+            The current web view is mainly a debugging surface and not a polished
+            product target.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>11. Recommended Next Steps</h2>
+        <ol>
+          <li>Replace demo OTP with real auth</li>
+          <li>Add geocoding and route/polyline overlap logic</li>
+          <li>Write real <code>ride_requests</code> and <code>bookings</code> rows</li>
+          <li>Expose trip detail read endpoints</li>
+          <li>Add live trip updates</li>
+          <li>Integrate payments</li>
+          <li>Use simulator, emulator, or dev build for stable native testing</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>12. Best Files for Another AI to Read First</h2>
+        <div class="card">
+          <ul>
+            <li><code>src/context/RideContext.js</code></li>
+            <li><code>src/services/api.js</code></li>
+            <li><code>src/screens/HomeScreen.js</code></li>
+            <li><code>src/screens/RideMatchScreen.js</code></li>
+            <li><code>src/screens/CheckoutScreen.js</code></li>
+            <li><code>backend/src/server.js</code></li>
+            <li><code>backend/src/services/matchingService.js</code></li>
+            <li><code>backend/src/services/bookingService.js</code></li>
+            <li><code>backend/src/db/schema.sql</code></li>
+            <li><code>backend/src/db/seed.sql</code></li>
+          </ul>
+        </div>
+      </section>
+
+      <div class="footer-note">
+        Short pitch: RideShare Connect is a smarter shared-mobility app for India
+        that increases match rates by pairing riders with overlapping routes
+        instead of identical destinations, while creating better pooled economics
+        for both riders and drivers.
+      </div>
+    </main>
+  </body>
+  </html>

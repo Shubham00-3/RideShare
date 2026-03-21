@@ -1,55 +1,56 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Dimensions,
   Animated,
+  Dimensions,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import {
-  Phone,
-  MessageCircle,
   AlertTriangle,
-  Navigation,
+  Bell,
   Car,
-  Star,
-  Users,
   Clock,
   MapPin,
+  MessageCircle,
+  Navigation,
+  Phone,
+  Star,
+  Users,
   X,
-  Bell,
 } from 'lucide-react-native';
-import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
+import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
+import { useRide } from '../context/RideContext';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
 export default function ActiveTripScreen({ navigation }) {
+  const { activeTrip } = useRide();
   const [showMidTripAlert, setShowMidTripAlert] = useState(false);
   const [tripProgress, setTripProgress] = useState(0.2);
   const pulseAnim = useState(new Animated.Value(1))[0];
 
   useEffect(() => {
-    // Simulate trip progress
     const interval = setInterval(() => {
-      setTripProgress((prev) => {
-        if (prev >= 0.9) {
+      setTripProgress((previous) => {
+        if (previous >= 0.92) {
           clearInterval(interval);
-          return 0.9;
+          return 0.92;
         }
-        return prev + 0.05;
+        return previous + 0.05;
       });
     }, 3000);
 
-    // Show mid-trip alert after 5 seconds
     const timeout = setTimeout(() => {
-      setShowMidTripAlert(true);
+      if (activeTrip?.midTripOffer) {
+        setShowMidTripAlert(true);
+      }
     }, 5000);
 
-    // Pulse animation for SOS
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.15, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1.12, duration: 800, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
       ])
     ).start();
@@ -58,66 +59,67 @@ export default function ActiveTripScreen({ navigation }) {
       clearInterval(interval);
       clearTimeout(timeout);
     };
-  }, []);
+  }, [activeTrip, pulseAnim]);
+
+  if (!activeTrip) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyTitle}>No active trip yet</Text>
+        <Text style={styles.emptySubtitle}>Book a matched ride first to see live trip state here.</Text>
+      </View>
+    );
+  }
+
+  const kmLeft = Math.max(Math.round((1 - tripProgress) * activeTrip.distanceKm), 1);
+  const etaLeft = Math.max(Math.round((1 - tripProgress) * activeTrip.durationMinutes), 3);
 
   return (
     <View style={styles.container}>
-      {/* Map Area */}
       <View style={styles.mapArea}>
         <View style={styles.mapPlaceholder}>
-          {/* Road lines */}
           <View style={styles.road1} />
           <View style={styles.road2} />
 
-          {/* Route path */}
           <View style={styles.routePath}>
-            <View style={styles.routeFilled} style={[styles.routeFilled, { width: `${tripProgress * 100}%` }]} />
+            <View style={[styles.routeFilled, { width: `${tripProgress * 100}%` }]} />
           </View>
 
-          {/* Pickup marker */}
           <View style={[styles.marker, styles.pickupMarker]}>
             <View style={styles.markerDot} />
             <Text style={styles.markerLabel}>Pickup</Text>
           </View>
 
-          {/* Driver car */}
           <View style={[styles.driverCar, { left: `${20 + tripProgress * 55}%` }]}>
             <Car size={18} color={COLORS.textInverse} />
           </View>
 
-          {/* Dropoff marker */}
           <View style={[styles.marker, styles.dropoffMarker]}>
             <View style={[styles.markerDot, { backgroundColor: COLORS.error }]} />
             <Text style={styles.markerLabel}>Drop</Text>
           </View>
 
-          {/* Distance badge */}
           <View style={styles.distanceBadge}>
             <MapPin size={12} color={COLORS.primary} />
-            <Text style={styles.distanceText}>
-              {Math.round((1 - tripProgress) * 15)} km left
-            </Text>
+            <Text style={styles.distanceText}>{kmLeft} km left</Text>
           </View>
         </View>
 
-        {/* Top controls */}
         <View style={styles.topControls}>
           <TouchableOpacity style={styles.controlBtn} onPress={() => navigation.goBack()}>
             <X size={20} color={COLORS.textPrimary} />
           </TouchableOpacity>
           <View style={styles.etaBadge}>
             <Clock size={14} color={COLORS.primary} />
-            <Text style={styles.etaText}>{Math.round((1 - tripProgress) * 35)} min</Text>
+            <Text style={styles.etaText}>{etaLeft} min</Text>
           </View>
         </View>
 
-        {/* Map controls */}
         <View style={styles.mapControls}>
           <TouchableOpacity style={styles.controlBtn}>
-            <Text style={{ fontSize: 18, ...FONTS.bold }}>+</Text>
+            <Text style={styles.controlText}>+</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.controlBtn}>
-            <Text style={{ fontSize: 18, ...FONTS.bold }}>−</Text>
+            <Text style={styles.controlText}>-</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.controlBtn, { marginTop: 8 }]}>
             <Navigation size={16} color={COLORS.primary} />
@@ -125,76 +127,77 @@ export default function ActiveTripScreen({ navigation }) {
         </View>
       </View>
 
-      {/* Mid-Trip Pickup Alert */}
-      {showMidTripAlert && (
+      {showMidTripAlert && activeTrip.midTripOffer ? (
         <View style={styles.midTripAlert}>
           <View style={styles.alertIcon}>
             <Bell size={16} color={COLORS.textInverse} />
           </View>
           <View style={styles.alertContent}>
-            <Text style={styles.alertTitle}>New rider joining in 3 min! 🎉</Text>
-            <Text style={styles.alertSubtitle}>Your fare reduces by ₹40</Text>
+            <Text style={styles.alertTitle}>{activeTrip.midTripOffer.title}</Text>
+            <Text style={styles.alertSubtitle}>Your fare reduces by ₹{activeTrip.midTripOffer.discount}</Text>
           </View>
           <TouchableOpacity onPress={() => setShowMidTripAlert(false)}>
             <X size={18} color={COLORS.textTertiary} />
           </TouchableOpacity>
         </View>
-      )}
+      ) : null}
 
-      {/* Trip Details Bottom Sheet */}
       <View style={styles.bottomSheet}>
         <View style={styles.sheetHandle} />
 
-        {/* Progress Bar */}
         <View style={styles.progressContainer}>
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${tripProgress * 100}%` }]} />
           </View>
-          <Text style={styles.progressText}>
-            {Math.round(tripProgress * 100)}% complete
-          </Text>
+          <Text style={styles.progressText}>{Math.round(tripProgress * 100)}% complete</Text>
         </View>
 
-        {/* Trip Info Header */}
         <View style={styles.tripHeader}>
-          <Text style={styles.tripTitle}>Start your trip</Text>
+          <Text style={styles.tripTitle}>Trip in progress</Text>
           <View style={styles.rideBadge}>
             <Users size={12} color={COLORS.success} />
-            <Text style={styles.rideType}>Shared Ride</Text>
+            <Text style={styles.rideType}>{activeTrip.rideType === 'solo' ? 'Solo' : 'Shared Ride'}</Text>
           </View>
         </View>
 
-        {/* Driver Info */}
         <View style={styles.driverCard}>
           <View style={styles.driverAvatar}>
-            <Text style={styles.driverAvatarText}>R</Text>
+            <Text style={styles.driverAvatarText}>{activeTrip.driver.name.charAt(0)}</Text>
           </View>
           <View style={styles.driverInfo}>
-            <Text style={styles.driverName}>Rajesh K.</Text>
+            <Text style={styles.driverName}>{activeTrip.driver.name}</Text>
             <View style={styles.driverMeta}>
               <Star size={12} color={COLORS.star} fill={COLORS.star} />
-              <Text style={styles.driverRating}>4.9</Text>
-              <Text style={styles.driverTrips}>• 1,250 trips</Text>
+              <Text style={styles.driverRating}>{activeTrip.driver.rating}</Text>
+              <Text style={styles.driverTrips}>• {activeTrip.driver.trips} trips</Text>
             </View>
           </View>
           <View style={styles.plateNumber}>
-            <Text style={styles.plateText}>DL 01 AB 1234</Text>
+            <Text style={styles.plateText}>{activeTrip.vehicle.plateNumber}</Text>
           </View>
         </View>
 
-        {/* Vehicle & Route */}
         <View style={styles.vehicleRoute}>
           <View style={styles.vehicleBadge}>
             <Car size={14} color={COLORS.primary} />
-            <Text style={styles.vehicleText}>Maruti Swift • White</Text>
+            <Text style={styles.vehicleText}>
+              {activeTrip.vehicle.name} • {activeTrip.vehicle.color}
+            </Text>
           </View>
           <View style={styles.routeInfo}>
             <MapPin size={14} color={COLORS.success} />
-            <Text style={styles.routeText} numberOfLines={1}>CP → Akshardham</Text>
+            <Text style={styles.routeText} numberOfLines={1}>
+              {activeTrip.routeLabel}
+            </Text>
           </View>
         </View>
 
-        {/* Action Buttons */}
+        <View style={styles.earningsCard}>
+          <Text style={styles.earningsTitle}>Current trip economics</Text>
+          <Text style={styles.earningsLine}>Fare paid: ₹{activeTrip.fareTotal}</Text>
+          <Text style={styles.earningsLine}>Savings unlocked: ₹{activeTrip.fareSavings}</Text>
+        </View>
+
         <View style={styles.actionRow}>
           <TouchableOpacity style={styles.actionBtn}>
             <Phone size={20} color={COLORS.primary} />
@@ -209,10 +212,7 @@ export default function ActiveTripScreen({ navigation }) {
             <Text style={styles.actionBtnText}>Share</Text>
           </TouchableOpacity>
           <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-            <TouchableOpacity
-              style={styles.sosButton}
-              onPress={() => navigation.navigate('SOS')}
-            >
+            <TouchableOpacity style={styles.sosButton} onPress={() => navigation.navigate('SOS')}>
               <AlertTriangle size={20} color={COLORS.textInverse} />
               <Text style={styles.sosText}>SOS</Text>
             </TouchableOpacity>
@@ -227,6 +227,24 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  emptyTitle: {
+    color: COLORS.textPrimary,
+    fontSize: SIZES.xxl,
+    ...FONTS.bold,
+  },
+  emptySubtitle: {
+    color: COLORS.textSecondary,
+    marginTop: 10,
+    textAlign: 'center',
+    lineHeight: 22,
+    ...FONTS.regular,
   },
   mapArea: {
     flex: 1,
@@ -258,27 +276,27 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '45%',
     left: '15%',
-    right: '15%',
-    height: 5,
-    backgroundColor: COLORS.primary + '30',
-    borderRadius: 3,
+    width: '70%',
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#CFD8E3',
   },
   routeFilled: {
-    height: 5,
+    height: 8,
+    borderRadius: 999,
     backgroundColor: COLORS.primary,
-    borderRadius: 3,
   },
   marker: {
     position: 'absolute',
     alignItems: 'center',
   },
   pickupMarker: {
-    top: '38%',
-    left: '12%',
+    top: '41%',
+    left: '14%',
   },
   dropoffMarker: {
-    top: '38%',
-    right: '12%',
+    top: '41%',
+    right: '13%',
   },
   markerDot: {
     width: 14,
@@ -289,41 +307,36 @@ const styles = StyleSheet.create({
     borderColor: COLORS.surface,
   },
   markerLabel: {
-    fontSize: 10,
-    color: COLORS.textSecondary,
-    ...FONTS.semiBold,
-    marginTop: 2,
+    marginTop: 4,
+    color: COLORS.textPrimary,
+    fontSize: SIZES.xs,
+    ...FONTS.medium,
   },
   driverCar: {
     position: 'absolute',
-    top: '40%',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    top: '42%',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOWS.medium,
-    marginLeft: -18,
   },
   distanceBadge: {
     position: 'absolute',
-    top: '60%',
-    alignSelf: 'center',
+    top: 64,
+    right: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderRadius: 20,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: SIZES.radius_full,
-    gap: 4,
-    ...SHADOWS.small,
-    left: '35%',
+    paddingVertical: 10,
   },
   distanceText: {
-    fontSize: SIZES.sm,
     color: COLORS.textPrimary,
-    ...FONTS.semiBold,
+    ...FONTS.medium,
   },
   topControls: {
     position: 'absolute',
@@ -341,99 +354,98 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOWS.medium,
+    ...SHADOWS.small,
   },
   etaBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: SIZES.radius_full,
     gap: 6,
-    ...SHADOWS.medium,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   etaText: {
-    fontSize: SIZES.md,
-    color: COLORS.primary,
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
+  },
+  controlText: {
+    color: COLORS.textPrimary,
+    fontSize: 18,
     ...FONTS.bold,
   },
   mapControls: {
     position: 'absolute',
     right: 16,
-    top: '35%',
+    bottom: 120,
   },
   midTripAlert: {
     position: 'absolute',
-    top: 110,
+    top: 120,
     left: 16,
     right: 16,
+    backgroundColor: COLORS.surface,
+    borderRadius: SIZES.radius_xl,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.success,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: SIZES.radius_lg,
-    gap: 10,
     ...SHADOWS.medium,
-    zIndex: 10,
   },
   alertIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: COLORS.success,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
   },
   alertContent: {
     flex: 1,
   },
   alertTitle: {
-    color: COLORS.textInverse,
-    fontSize: SIZES.md,
-    ...FONTS.bold,
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
   },
   alertSubtitle: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: SIZES.sm,
+    color: COLORS.textSecondary,
+    marginTop: 3,
     ...FONTS.regular,
   },
   bottomSheet: {
+    minHeight: height * 0.4,
     backgroundColor: COLORS.surface,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
     paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 36,
+    paddingTop: 14,
+    paddingBottom: 20,
     ...SHADOWS.large,
   },
   sheetHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
+    width: 42,
+    height: 5,
+    borderRadius: 999,
     backgroundColor: COLORS.border,
     alignSelf: 'center',
     marginBottom: 14,
   },
   progressContainer: {
-    marginBottom: 14,
+    marginBottom: 16,
   },
   progressBar: {
-    height: 6,
-    backgroundColor: COLORS.primary + '15',
-    borderRadius: 3,
-    overflow: 'hidden',
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: COLORS.borderLight,
   },
   progressFill: {
-    height: 6,
+    height: 8,
+    borderRadius: 999,
     backgroundColor: COLORS.primary,
-    borderRadius: 3,
   },
   progressText: {
-    fontSize: SIZES.xs,
-    color: COLORS.textTertiary,
-    marginTop: 4,
+    color: COLORS.textSecondary,
+    marginTop: 8,
     ...FONTS.medium,
   },
   tripHeader: {
@@ -443,48 +455,48 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   tripTitle: {
-    fontSize: SIZES.xxl,
     color: COLORS.textPrimary,
+    fontSize: SIZES.xxl,
     ...FONTS.bold,
   },
   rideBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.success + '15',
+    gap: 6,
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: SIZES.radius_full,
-    gap: 4,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: `${COLORS.success}16`,
   },
   rideType: {
-    fontSize: SIZES.xs,
     color: COLORS.success,
     ...FONTS.semiBold,
   },
   driverCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radius_xl,
+    padding: 14,
   },
   driverAvatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: COLORS.primary + '15',
+    backgroundColor: `${COLORS.primary}16`,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
   },
   driverAvatarText: {
-    fontSize: SIZES.xl,
     color: COLORS.primary,
+    fontSize: SIZES.lg,
     ...FONTS.bold,
   },
   driverInfo: {
     flex: 1,
   },
   driverName: {
-    fontSize: SIZES.lg,
     color: COLORS.textPrimary,
     ...FONTS.semiBold,
   },
@@ -492,86 +504,104 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: 2,
+    marginTop: 4,
   },
   driverRating: {
-    fontSize: SIZES.sm,
-    color: COLORS.textSecondary,
-    ...FONTS.semiBold,
-  },
-  driverTrips: {
-    fontSize: SIZES.sm,
-    color: COLORS.textTertiary,
-    ...FONTS.regular,
-  },
-  plateNumber: {
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: SIZES.radius_sm,
-  },
-  plateText: {
-    fontSize: SIZES.sm,
-    color: COLORS.textPrimary,
-    ...FONTS.bold,
-    letterSpacing: 0.5,
-  },
-  vehicleRoute: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 16,
-  },
-  vehicleBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  vehicleText: {
-    fontSize: SIZES.sm,
     color: COLORS.textSecondary,
     ...FONTS.medium,
   },
-  routeInfo: {
+  driverTrips: {
+    color: COLORS.textTertiary,
+    ...FONTS.medium,
+  },
+  plateNumber: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: SIZES.radius_lg,
+    backgroundColor: COLORS.surface,
+  },
+  plateText: {
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
+  },
+  vehicleRoute: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  vehicleBadge: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
+    backgroundColor: '#F8FAFF',
+    borderRadius: SIZES.radius_lg,
+    padding: 12,
+  },
+  vehicleText: {
+    color: COLORS.textPrimary,
+    ...FONTS.medium,
+  },
+  routeInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#F5FFF8',
+    borderRadius: SIZES.radius_lg,
+    padding: 12,
   },
   routeText: {
-    fontSize: SIZES.sm,
+    color: COLORS.textPrimary,
+    ...FONTS.medium,
+  },
+  earningsCard: {
+    marginTop: 14,
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radius_xl,
+    padding: 14,
+  },
+  earningsTitle: {
+    color: COLORS.textPrimary,
+    marginBottom: 8,
+    ...FONTS.semiBold,
+  },
+  earningsLine: {
     color: COLORS.textSecondary,
+    marginTop: 2,
     ...FONTS.medium,
   },
   actionRow: {
     flexDirection: 'row',
-    gap: 10,
+    justifyContent: 'space-between',
+    marginTop: 16,
   },
   actionBtn: {
-    flex: 1,
+    width: 74,
     alignItems: 'center',
-    paddingVertical: 12,
+    justifyContent: 'center',
     borderRadius: SIZES.radius_lg,
-    backgroundColor: COLORS.primary + '08',
-    gap: 4,
+    backgroundColor: COLORS.background,
+    paddingVertical: 12,
+    gap: 6,
   },
   actionBtnText: {
+    color: COLORS.textPrimary,
     fontSize: SIZES.xs,
-    color: COLORS.primary,
-    ...FONTS.semiBold,
+    ...FONTS.medium,
   },
   sosButton: {
-    flex: 1,
+    width: 74,
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    justifyContent: 'center',
     borderRadius: SIZES.radius_lg,
     backgroundColor: COLORS.error,
-    gap: 4,
-    minWidth: 65,
+    paddingVertical: 12,
+    gap: 6,
   },
   sosText: {
-    fontSize: SIZES.xs,
     color: COLORS.textInverse,
-    ...FONTS.bold,
+    fontSize: SIZES.xs,
+    ...FONTS.semiBold,
   },
 });
