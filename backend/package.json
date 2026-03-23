@@ -5,12 +5,19 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "nodemon src/server.js",
+    "seed:dummy": "node scripts/seed-dummy-data.js",
+    "reset:demo": "node scripts/reset-demo-data.js",
+    "healthcheck": "node scripts/healthcheck.js",
+    "smoke": "node scripts/api-smoke-check.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

@@ -89,3 +89,23 @@ create table if not exists bookings (
   booking_status text not null default 'confirmed',
   created_at timestamptz not null default now()
 );
+
+create table if not exists auth_otps (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  phone text not null,
+  code_hash text not null,
+  expires_at timestamptz not null,
+  consumed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists user_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  last_seen_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);

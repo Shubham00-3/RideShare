@@ -70,6 +70,57 @@ function buildRideRequest(payload) {
   };
 }
 
+async function persistRideRequest(request, options = {}) {
+  const pool = db.getPool();
+
+  if (!pool) {
+    return request;
+  }
+
+  const { userId = null } = options;
+
+  const corridorId =
+    request.corridorId && request.corridorId !== 'generic_city_corridor'
+      ? request.corridorId
+      : null;
+
+  const insertQuery = `
+    insert into ride_requests (
+      rider_id,
+      corridor_id,
+      pickup_label,
+      dropoff_label,
+      origin_km,
+      destination_km,
+      ride_type,
+      seats_required,
+      allow_mid_trip_pickup,
+      departure_time,
+      status
+    )
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'searching')
+    returning id
+  `;
+
+  const result = await db.query(insertQuery, [
+    userId,
+    corridorId,
+    request.pickup,
+    request.dropoff,
+    request.originKm,
+    request.destinationKm,
+    request.rideType,
+    request.seatsRequired,
+    request.allowMidTripPickup,
+    request.departureTime,
+  ]);
+
+  return {
+    ...request,
+    id: result.rows[0]?.id || request.id,
+  };
+}
+
 function overlapWindow(aStart, aEnd, bStart, bEnd) {
   return new Date(aStart).getTime() <= new Date(bEnd).getTime() &&
     new Date(bStart).getTime() <= new Date(aEnd).getTime();
@@ -181,8 +232,9 @@ async function fetchCandidateRows(request) {
   return result.rows.length > 0 ? result.rows : seedCandidates;
 }
 
-async function previewMatches(payload) {
-  const request = buildRideRequest(payload);
+async function previewMatches(payload, options = {}) {
+  const initialRequest = buildRideRequest(payload);
+  const request = await persistRideRequest(initialRequest, options);
   const candidates = await fetchCandidateRows(request);
 
   const matches = candidates

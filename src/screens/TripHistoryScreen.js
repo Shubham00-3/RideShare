@@ -1,128 +1,176 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
+  ActivityIndicator,
   ScrollView,
+  StyleSheet,
+  Text,
   TouchableOpacity,
+  View,
 } from 'react-native';
 import {
-  MapPin,
+  Calendar,
+  Car,
+  ChevronRight,
   Clock,
+  MapPin,
   Star,
   TrendingDown,
   Users,
-  Car,
-  ChevronRight,
-  Calendar,
 } from 'lucide-react-native';
 import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
-import { MOCK_TRIPS } from '../constants/data';
+import { useRide } from '../context/RideContext';
 
 export default function TripHistoryScreen() {
+  const { bookingHistory, error, loading, refreshBookingHistory } = useRide();
+
+  useEffect(() => {
+    refreshBookingHistory().catch(() => {
+      // Shared state already exposes the error message.
+    });
+  }, [refreshBookingHistory]);
+
+  const summary = {
+    totalRides: bookingHistory.length,
+    totalSaved: bookingHistory.reduce(
+      (sum, booking) => sum + (booking.trip?.fareSavings || 0),
+      0
+    ),
+    sharedRides: bookingHistory.filter((booking) => booking.trip?.rideType !== 'solo').length,
+  };
+
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Trips</Text>
-        <Text style={styles.headerSubtitle}>Track all your ride history</Text>
+        <Text style={styles.headerSubtitle}>Track all your persisted ride history</Text>
       </View>
 
-      {/* Summary Cards */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.summaryScroll}>
         <View style={styles.summaryRow}>
           <View style={[styles.summaryCard, { backgroundColor: COLORS.primary }]}>
             <Car size={20} color={COLORS.textInverse} />
-            <Text style={styles.summaryValue}>47</Text>
+            <Text style={styles.summaryValue}>{summary.totalRides}</Text>
             <Text style={styles.summaryLabel}>Total Rides</Text>
           </View>
           <View style={[styles.summaryCard, { backgroundColor: COLORS.success }]}>
             <TrendingDown size={20} color={COLORS.textInverse} />
-            <Text style={styles.summaryValue}>₹4,280</Text>
+            <Text style={styles.summaryValue}>Rs {summary.totalSaved}</Text>
             <Text style={styles.summaryLabel}>Total Saved</Text>
           </View>
           <View style={[styles.summaryCard, { backgroundColor: COLORS.accent }]}>
             <Users size={20} color={COLORS.textInverse} />
-            <Text style={styles.summaryValue}>32</Text>
+            <Text style={styles.summaryValue}>{summary.sharedRides}</Text>
             <Text style={styles.summaryLabel}>Shared Rides</Text>
           </View>
         </View>
       </ScrollView>
 
-      {/* Trip List */}
       <ScrollView style={styles.tripList} showsVerticalScrollIndicator={false}>
         <View style={styles.dateHeader}>
           <Calendar size={14} color={COLORS.textTertiary} />
-          <Text style={styles.dateText}>This Week</Text>
+          <Text style={styles.dateText}>Recent bookings</Text>
         </View>
 
-        {MOCK_TRIPS.map((trip) => (
-          <TouchableOpacity key={trip.id} style={styles.tripCard}>
-            <View style={styles.tripTop}>
-              <View style={styles.tripRoute}>
-                <View style={styles.routeDots}>
-                  <View style={styles.greenDot} />
-                  <View style={styles.dottedLine} />
-                  <View style={styles.redDot} />
-                </View>
-                <View style={styles.routeTexts}>
-                  <Text style={styles.routeText}>{trip.pickup}</Text>
-                  <Text style={styles.routeText}>{trip.dropoff}</Text>
-                </View>
-              </View>
-              <View style={styles.tripFare}>
-                <Text style={styles.fareAmount}>{trip.fare}</Text>
-                {trip.savings && (
-                  <View style={styles.savingsBadge}>
-                    <TrendingDown size={10} color={COLORS.success} />
-                    <Text style={styles.savingsText}>{trip.savings}</Text>
+        {loading && bookingHistory.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <ActivityIndicator color={COLORS.primary} />
+            <Text style={styles.emptyText}>Loading trip history...</Text>
+          </View>
+        ) : null}
+
+        {!loading && bookingHistory.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>No rides yet</Text>
+            <Text style={styles.emptyText}>
+              Your confirmed bookings will appear here once you ride through the app.
+            </Text>
+          </View>
+        ) : null}
+
+        {bookingHistory.map((booking) => {
+          const trip = booking.trip;
+          const tripDate = booking.createdAt ? new Date(booking.createdAt) : null;
+          const fareLabel = `Rs ${trip?.fareTotal || 0}`;
+          const savingsLabel = trip?.fareSavings ? `Rs ${trip.fareSavings}` : null;
+          const tripType = trip?.rideType === 'solo' ? 'Solo' : 'Shared';
+
+          return (
+            <TouchableOpacity key={booking.bookingId} style={styles.tripCard}>
+              <View style={styles.tripTop}>
+                <View style={styles.tripRoute}>
+                  <View style={styles.routeDots}>
+                    <View style={styles.greenDot} />
+                    <View style={styles.dottedLine} />
+                    <View style={styles.redDot} />
                   </View>
-                )}
-              </View>
-            </View>
-
-            <View style={styles.tripMeta}>
-              <View style={styles.metaItem}>
-                <Clock size={12} color={COLORS.textTertiary} />
-                <Text style={styles.metaText}>{trip.date} • {trip.time}</Text>
-              </View>
-              <View style={styles.metaItem}>
-                <MapPin size={12} color={COLORS.textTertiary} />
-                <Text style={styles.metaText}>{trip.distance}</Text>
-              </View>
-              <View style={styles.metaItem}>
-                {trip.type === 'Shared' ? (
-                  <Users size={12} color={COLORS.success} />
-                ) : (
-                  <Car size={12} color={COLORS.primary} />
-                )}
-                <Text style={[styles.metaText, trip.type === 'Shared' && { color: COLORS.success }]}>
-                  {trip.type}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.tripBottom}>
-              <View style={styles.driverInfo}>
-                <View style={styles.driverAvatar}>
-                  <Text style={styles.driverAvatarText}>{trip.driver.charAt(0)}</Text>
+                  <View style={styles.routeTexts}>
+                    <Text style={styles.routeText}>{trip?.pickup}</Text>
+                    <Text style={styles.routeText}>{trip?.dropoff}</Text>
+                  </View>
                 </View>
-                <Text style={styles.driverName}>{trip.driver}</Text>
+                <View style={styles.tripFare}>
+                  <Text style={styles.fareAmount}>{fareLabel}</Text>
+                  {savingsLabel ? (
+                    <View style={styles.savingsBadge}>
+                      <TrendingDown size={10} color={COLORS.success} />
+                      <Text style={styles.savingsText}>{savingsLabel}</Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
-              <View style={styles.ratingRow}>
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <Star
-                    key={star}
-                    size={14}
-                    color={COLORS.star}
-                    fill={star <= trip.rating ? COLORS.star : 'transparent'}
-                  />
-                ))}
+
+              <View style={styles.tripMeta}>
+                <View style={styles.metaItem}>
+                  <Clock size={12} color={COLORS.textTertiary} />
+                  <Text style={styles.metaText}>
+                    {tripDate ? tripDate.toLocaleDateString() : 'Today'} •{' '}
+                    {tripDate
+                      ? tripDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      : 'now'}
+                  </Text>
+                </View>
+                <View style={styles.metaItem}>
+                  <MapPin size={12} color={COLORS.textTertiary} />
+                  <Text style={styles.metaText}>{trip?.distanceKm || 0} km</Text>
+                </View>
+                <View style={styles.metaItem}>
+                  {tripType === 'Shared' ? (
+                    <Users size={12} color={COLORS.success} />
+                  ) : (
+                    <Car size={12} color={COLORS.primary} />
+                  )}
+                  <Text style={[styles.metaText, tripType === 'Shared' && { color: COLORS.success }]}>
+                    {tripType}
+                  </Text>
+                </View>
               </View>
-              <ChevronRight size={16} color={COLORS.textTertiary} />
-            </View>
-          </TouchableOpacity>
-        ))}
+
+              <View style={styles.tripBottom}>
+                <View style={styles.driverInfo}>
+                  <View style={styles.driverAvatar}>
+                    <Text style={styles.driverAvatarText}>
+                      {trip?.driver?.name?.charAt(0) || 'D'}
+                    </Text>
+                  </View>
+                  <Text style={styles.driverName}>{trip?.driver?.name || 'Driver assigned'}</Text>
+                </View>
+                <View style={styles.ratingRow}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <Star
+                      key={star}
+                      size={14}
+                      color={COLORS.star}
+                      fill={star <= Math.round(trip?.driver?.rating || 0) ? COLORS.star : 'transparent'}
+                    />
+                  ))}
+                </View>
+                <ChevronRight size={16} color={COLORS.textTertiary} />
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -317,5 +365,29 @@ const styles = StyleSheet.create({
   ratingRow: {
     flexDirection: 'row',
     gap: 2,
+  },
+  emptyCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: SIZES.radius_xl,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 12,
+    ...SHADOWS.small,
+  },
+  emptyTitle: {
+    color: COLORS.textPrimary,
+    fontSize: SIZES.lg,
+    ...FONTS.bold,
+  },
+  emptyText: {
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginTop: 10,
+    ...FONTS.regular,
+  },
+  errorText: {
+    color: COLORS.error,
+    marginTop: 10,
+    ...FONTS.medium,
   },
 });

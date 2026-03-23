@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View } from 'react-native';
 import { Home, Clock, User, Car } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
+import { useAuth } from '../context/AuthContext';
 
 // Screens
 import OnboardingScreen from '../screens/OnboardingScreen';
@@ -82,6 +83,8 @@ function MainTabs() {
 }
 
 export default function AppNavigator() {
+  const { isAuthenticated } = useAuth();
+
   return (
     <NavigationContainer>
       <StatusBar style="light" />
@@ -91,14 +94,21 @@ export default function AppNavigator() {
           animation: 'slide_from_right',
         }}
       >
-        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="MainTabs" component={MainTabs} />
-        <Stack.Screen name="RideMatch" component={RideMatchScreen} />
-        <Stack.Screen name="VehicleSelect" component={VehicleSelectScreen} />
-        <Stack.Screen name="Checkout" component={CheckoutScreen} />
-        <Stack.Screen name="ActiveTrip" component={ActiveTripScreen} />
-        <Stack.Screen name="SOS" component={SOSScreen} />
+        {isAuthenticated ? (
+          <>
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="RideMatch" component={RideMatchScreen} />
+            <Stack.Screen name="VehicleSelect" component={VehicleSelectScreen} />
+            <Stack.Screen name="Checkout" component={CheckoutScreen} />
+            <Stack.Screen name="ActiveTrip" component={ActiveTripScreen} />
+            <Stack.Screen name="SOS" component={SOSScreen} />
+          </>
+        ) : (
+          <>
+            <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+            <Stack.Screen name="Login" component={LoginScreen} />
+          </>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

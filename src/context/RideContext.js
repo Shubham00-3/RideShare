@@ -1,7 +1,11 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { useAuth } from './AuthContext';
 import {
   confirmRideBooking,
+  fetchBookingDetails,
   fetchBookingQuote,
+  fetchMyBookings,
+  hasApiBaseUrl,
   previewRideMatches,
 } from '../services/api';
 
@@ -17,6 +21,7 @@ const DEFAULT_SEARCH = {
 };
 
 export function RideProvider({ children }) {
+  const { token } = useAuth();
   const [searchForm, setSearchForm] = useState(DEFAULT_SEARCH);
   const [rideRequest, setRideRequest] = useState(null);
   const [matches, setMatches] = useState([]);
@@ -24,6 +29,9 @@ export function RideProvider({ children }) {
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [quote, setQuote] = useState(null);
   const [activeTrip, setActiveTrip] = useState(null);
+  const [activeBookingId, setActiveBookingId] = useState(null);
+  const [activeBookingSource, setActiveBookingSource] = useState(null);
+  const [bookingHistory, setBookingHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -37,7 +45,7 @@ export function RideProvider({ children }) {
     setError(null);
 
     try {
-      const response = await previewRideMatches(nextSearch);
+      const response = await previewRideMatches(nextSearch, token);
 
       setSearchForm(nextSearch);
       setRideRequest(response.request);
@@ -46,6 +54,8 @@ export function RideProvider({ children }) {
       setSelectedVehicle(null);
       setQuote(null);
       setActiveTrip(null);
+      setActiveBookingId(null);
+      setActiveBookingSource(null);
 
       return response;
     } catch (searchError) {
@@ -55,7 +65,7 @@ export function RideProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [token]);
 
   const chooseMatch = useCallback((match) => {
     setSelectedMatch(match);
@@ -86,7 +96,7 @@ export function RideProvider({ children }) {
           allowMidTripPickup: true,
           ...options,
         },
-      });
+      }, token);
       setQuote(nextQuote);
       return nextQuote;
     } catch (quoteError) {
@@ -96,7 +106,7 @@ export function RideProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [rideRequest, selectedMatch, selectedVehicle]);
+  }, [rideRequest, selectedMatch, selectedVehicle, token]);
 
   const createBooking = useCallback(async (options = {}) => {
     if (!rideRequest || !selectedMatch || !selectedVehicle) {
@@ -114,9 +124,11 @@ export function RideProvider({ children }) {
         vehicle: selectedVehicle,
         quote: nextQuote,
         options,
-      });
+      }, token);
       setQuote(nextQuote);
       setActiveTrip(booking.trip);
+      setActiveBookingId(booking.bookingId);
+      setActiveBookingSource(booking.source || 'api');
       return booking;
     } catch (bookingError) {
       const message = bookingError.message || 'Unable to confirm ride right now.';
@@ -125,11 +137,62 @@ export function RideProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [quote, refreshQuote, rideRequest, selectedMatch, selectedVehicle]);
+  }, [quote, refreshQuote, rideRequest, selectedMatch, selectedVehicle, token]);
+
+  const refreshActiveBooking = useCallback(async (bookingIdOverride) => {
+    const bookingId = bookingIdOverride || activeBookingId;
+
+    if (!bookingId || !hasApiBaseUrl) {
+      return null;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const booking = await fetchBookingDetails(bookingId, token);
+      setActiveBookingId(booking.bookingId);
+      setActiveBookingSource(booking.source || 'api');
+      setActiveTrip(booking.trip);
+      return booking;
+    } catch (bookingError) {
+      const message = bookingError.message || 'Unable to refresh trip right now.';
+      setError(message);
+      throw bookingError;
+    } finally {
+      setLoading(false);
+    }
+  }, [activeBookingId, token]);
+
+  const refreshBookingHistory = useCallback(async () => {
+    if (!token || !hasApiBaseUrl) {
+      setBookingHistory([]);
+      return [];
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetchMyBookings(token);
+      const items = response.items || [];
+      setBookingHistory(items);
+      return items;
+    } catch (historyError) {
+      const message = historyError.message || 'Unable to load trip history right now.';
+      setError(message);
+      throw historyError;
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
 
   const value = useMemo(
     () => ({
+      activeBookingId,
+      activeBookingSource,
       activeTrip,
+      bookingHistory,
       chooseMatch,
       chooseVehicle,
       createBooking,
@@ -137,6 +200,8 @@ export function RideProvider({ children }) {
       loading,
       matches,
       quote,
+      refreshActiveBooking,
+      refreshBookingHistory,
       refreshQuote,
       rideRequest,
       searchForm,
@@ -148,10 +213,15 @@ export function RideProvider({ children }) {
     }),
     [
       activeTrip,
+      activeBookingId,
+      activeBookingSource,
+      bookingHistory,
       error,
       loading,
       matches,
       quote,
+      refreshActiveBooking,
+      refreshBookingHistory,
       rideRequest,
       searchForm,
       selectedMatch,

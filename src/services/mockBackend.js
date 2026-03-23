@@ -129,6 +129,7 @@ export function buildMockBooking({ request, match, vehicle, quote, options }) {
   return {
     bookingId: `booking_${now}`,
     status: 'confirmed',
+    source: 'mock',
     trip: {
       id: `trip_${now}`,
       status: 'driver_arriving',

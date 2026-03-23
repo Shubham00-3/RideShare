@@ -26,10 +26,25 @@ import { useRide } from '../context/RideContext';
 const { height } = Dimensions.get('window');
 
 export default function ActiveTripScreen({ navigation }) {
-  const { activeTrip } = useRide();
+  const {
+    activeBookingId,
+    activeBookingSource,
+    activeTrip,
+    refreshActiveBooking,
+  } = useRide();
   const [showMidTripAlert, setShowMidTripAlert] = useState(false);
   const [tripProgress, setTripProgress] = useState(0.2);
   const pulseAnim = useState(new Animated.Value(1))[0];
+
+  useEffect(() => {
+    if (!activeBookingId || activeBookingSource !== 'api') {
+      return;
+    }
+
+    refreshActiveBooking().catch(() => {
+      // Keep the last known trip state on screen if refresh fails.
+    });
+  }, [activeBookingId, activeBookingSource, refreshActiveBooking]);
 
   useEffect(() => {
     const interval = setInterval(() => {

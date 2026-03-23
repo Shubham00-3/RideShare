@@ -1,50 +1,73 @@
-import React, { useState, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  TouchableOpacity,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Animated,
-  Dimensions,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Shield, Phone, ArrowRight, CheckCircle } from 'lucide-react-native';
+import { Shield, ArrowRight, CheckCircle } from 'lucide-react-native';
 import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
+import { useAuth } from '../context/AuthContext';
 
-const { width } = Dimensions.get('window');
-
-export default function LoginScreen({ navigation }) {
-  const [step, setStep] = useState('phone'); // 'phone' | 'otp'
+export default function LoginScreen() {
+  const { error, loading, requestOtp, setError, verifyOtp } = useAuth();
+  const [step, setStep] = useState('phone');
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [devOtp, setDevOtp] = useState(null);
+  const [maskedPhone, setMaskedPhone] = useState('');
   const otpRefs = useRef([]);
-  const slideAnim = useRef(new Animated.Value(0)).current;
 
-  const handleSendOTP = () => {
-    if (phone.length >= 10) {
-      Animated.timing(slideAnim, {
-        toValue: -width,
-        duration: 300,
-        useNativeDriver: true,
-      }).start(() => setStep('otp'));
+  const formattedOtp = useMemo(() => otp.join(''), [otp]);
+
+  const handleSendOTP = async () => {
+    if (phone.length < 10 || loading) {
+      return;
+    }
+
+    try {
+      setError(null);
+      const response = await requestOtp(phone);
+      setMaskedPhone(response.maskedPhone || `+91 ${phone}`);
+      setDevOtp(response.devOtp || null);
+      setStep('otp');
+    } catch (_error) {
+      // Shared auth state already exposes the message.
+    }
+  };
+
+  const handleVerifyOTP = async (codeOverride) => {
+    const code = codeOverride || formattedOtp;
+
+    if (code.length !== 6 || loading) {
+      return;
+    }
+
+    try {
+      setError(null);
+      await verifyOtp(phone, code);
+    } catch (_error) {
+      // Shared auth state already exposes the message.
     }
   };
 
   const handleOTPChange = (text, index) => {
-    const newOtp = [...otp];
-    newOtp[index] = text;
-    setOtp(newOtp);
+    const nextOtp = [...otp];
+    nextOtp[index] = text.replace(/\D/g, '');
+    setOtp(nextOtp);
 
     if (text && index < 5) {
       otpRefs.current[index + 1]?.focus();
     }
 
-    if (newOtp.every((d) => d !== '')) {
+    if (nextOtp.every((digit) => digit !== '')) {
       setTimeout(() => {
-        navigation.replace('MainTabs');
-      }, 500);
+        handleVerifyOTP(nextOtp.join(''));
+      }, 150);
     }
   };
 
@@ -54,6 +77,11 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  const handleResend = async () => {
+    setOtp(['', '', '', '', '', '']);
+    await handleSendOTP();
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -61,22 +89,22 @@ export default function LoginScreen({ navigation }) {
     >
       <View style={styles.header}>
         <View style={styles.logoCircle}>
-          <Text style={styles.logoIcon}>🚗</Text>
+          <Text style={styles.logoIcon}>Ride</Text>
         </View>
         <Text style={styles.appName}>RideShare Connect</Text>
-        <Text style={styles.tagline}>Smart Carpooling, Smart Savings</Text>
+        <Text style={styles.tagline}>Phone OTP sign-in backed by the API and database</Text>
       </View>
 
       {step === 'phone' ? (
         <View style={styles.formContainer}>
           <Text style={styles.formTitle}>Welcome!</Text>
           <Text style={styles.formSubtitle}>
-            Enter your mobile number to get started
+            Enter your mobile number to request a live OTP from the backend.
           </Text>
 
           <View style={styles.phoneInputContainer}>
             <View style={styles.countryCode}>
-              <Text style={styles.flag}>🇮🇳</Text>
+              <Text style={styles.flag}>IN</Text>
               <Text style={styles.codeText}>+91</Text>
             </View>
             <TextInput
@@ -93,44 +121,33 @@ export default function LoginScreen({ navigation }) {
           <TouchableOpacity
             style={[
               styles.primaryButton,
-              phone.length < 10 && styles.buttonDisabled,
+              (phone.length < 10 || loading) && styles.buttonDisabled,
             ]}
             onPress={handleSendOTP}
-            disabled={phone.length < 10}
+            disabled={phone.length < 10 || loading}
           >
-            <Text style={styles.primaryButtonText}>Get OTP</Text>
-            <ArrowRight size={20} color={COLORS.textInverse} />
+            {loading ? (
+              <ActivityIndicator color={COLORS.textInverse} />
+            ) : (
+              <>
+                <Text style={styles.primaryButtonText}>Get OTP</Text>
+                <ArrowRight size={20} color={COLORS.textInverse} />
+              </>
+            )}
           </TouchableOpacity>
 
           <View style={styles.infoRow}>
             <Shield size={16} color={COLORS.primary} />
             <Text style={styles.infoText}>
-              Your number is safe & secure with us
+              Your rider identity is now stored in the backend
             </Text>
-          </View>
-
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or continue with</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <View style={styles.socialRow}>
-            <TouchableOpacity style={styles.socialButton}>
-              <Text style={styles.socialEmoji}>📧</Text>
-              <Text style={styles.socialText}>Email</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.socialButton}>
-              <Text style={styles.socialEmoji}>G</Text>
-              <Text style={styles.socialText}>Google</Text>
-            </TouchableOpacity>
           </View>
         </View>
       ) : (
         <View style={styles.formContainer}>
           <Text style={styles.formTitle}>Verify OTP</Text>
           <Text style={styles.formSubtitle}>
-            We sent a 6-digit code to +91 {phone}
+            We sent a 6-digit code to {maskedPhone || `+91 ${phone}`}
           </Text>
 
           <View style={styles.otpContainer}>
@@ -150,20 +167,40 @@ export default function LoginScreen({ navigation }) {
             ))}
           </View>
 
-          <TouchableOpacity style={styles.resendRow}>
+          {devOtp ? (
+            <View style={styles.devOtpCard}>
+              <Text style={styles.devOtpLabel}>Local dev OTP</Text>
+              <Text style={styles.devOtpValue}>{devOtp}</Text>
+            </View>
+          ) : null}
+
+          <TouchableOpacity style={styles.resendRow} onPress={handleResend} disabled={loading}>
             <Text style={styles.resendText}>Didn't receive code? </Text>
             <Text style={styles.resendLink}>Resend OTP</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.primaryButton, { marginTop: 20 }]}
-            onPress={() => navigation.replace('MainTabs')}
+            style={[
+              styles.primaryButton,
+              (formattedOtp.length !== 6 || loading) && styles.buttonDisabled,
+              { marginTop: 20 },
+            ]}
+            onPress={() => handleVerifyOTP()}
+            disabled={formattedOtp.length !== 6 || loading}
           >
-            <CheckCircle size={20} color={COLORS.textInverse} />
-            <Text style={styles.primaryButtonText}>Verify & Continue</Text>
+            {loading ? (
+              <ActivityIndicator color={COLORS.textInverse} />
+            ) : (
+              <>
+                <CheckCircle size={20} color={COLORS.textInverse} />
+                <Text style={styles.primaryButtonText}>Verify & Continue</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
       )}
+
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <Text style={styles.terms}>
         By continuing, you agree to our{' '}
@@ -197,7 +234,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   logoIcon: {
-    fontSize: 36,
+    fontSize: 20,
+    color: COLORS.textInverse,
+    ...FONTS.bold,
   },
   appName: {
     fontSize: SIZES.xxl,
@@ -208,6 +247,8 @@ const styles = StyleSheet.create({
     fontSize: SIZES.md,
     color: 'rgba(255,255,255,0.8)',
     marginTop: 4,
+    textAlign: 'center',
+    paddingHorizontal: 28,
     ...FONTS.regular,
   },
   formContainer: {
@@ -247,7 +288,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   flag: {
-    fontSize: 20,
+    fontSize: 16,
+    color: COLORS.textSecondary,
+    ...FONTS.semiBold,
   },
   codeText: {
     fontSize: SIZES.lg,
@@ -294,48 +337,6 @@ const styles = StyleSheet.create({
     fontSize: SIZES.sm,
     ...FONTS.regular,
   },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 32,
-    gap: 12,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.border,
-  },
-  dividerText: {
-    color: COLORS.textTertiary,
-    fontSize: SIZES.sm,
-    ...FONTS.regular,
-  },
-  socialRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 20,
-  },
-  socialButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: SIZES.radius_lg,
-    backgroundColor: COLORS.surface,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    gap: 8,
-    ...SHADOWS.small,
-  },
-  socialEmoji: {
-    fontSize: 18,
-  },
-  socialText: {
-    fontSize: SIZES.md,
-    color: COLORS.textPrimary,
-    ...FONTS.medium,
-  },
   otpContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -359,6 +360,24 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
     backgroundColor: '#EBF5FF',
   },
+  devOtpCard: {
+    alignItems: 'center',
+    marginTop: 22,
+    borderRadius: SIZES.radius_lg,
+    backgroundColor: '#F8FBFF',
+    paddingVertical: 14,
+  },
+  devOtpLabel: {
+    color: COLORS.textSecondary,
+    ...FONTS.medium,
+  },
+  devOtpValue: {
+    color: COLORS.primary,
+    marginTop: 6,
+    fontSize: SIZES.xxl,
+    letterSpacing: 4,
+    ...FONTS.bold,
+  },
   resendRow: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -373,6 +392,13 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontSize: SIZES.md,
     ...FONTS.semiBold,
+  },
+  errorText: {
+    color: COLORS.error,
+    paddingHorizontal: 24,
+    paddingBottom: 12,
+    textAlign: 'center',
+    ...FONTS.medium,
   },
   terms: {
     textAlign: 'center',
