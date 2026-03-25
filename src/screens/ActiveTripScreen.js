@@ -22,8 +22,10 @@ import {
 } from 'lucide-react-native';
 import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
 import { useRide } from '../context/RideContext';
+import RouteMap from '../components/RouteMap';
 
 const { height } = Dimensions.get('window');
+const LIVE_REFRESH_MS = 5000;
 
 export default function ActiveTripScreen({ navigation }) {
   const {
@@ -33,48 +35,73 @@ export default function ActiveTripScreen({ navigation }) {
     refreshActiveBooking,
   } = useRide();
   const [showMidTripAlert, setShowMidTripAlert] = useState(false);
-  const [tripProgress, setTripProgress] = useState(0.2);
+  const [dismissedOfferKey, setDismissedOfferKey] = useState(null);
+  const [localTripProgress, setLocalTripProgress] = useState(0.2);
   const pulseAnim = useState(new Animated.Value(1))[0];
+  const isBackendBackedTrip = Boolean(activeBookingId && activeBookingSource === 'api');
+  const activeOfferKey = activeTrip?.midTripOffer
+    ? `${activeTrip.id}:${activeTrip.midTripOffer.title}`
+    : null;
 
   useEffect(() => {
-    if (!activeBookingId || activeBookingSource !== 'api') {
-      return;
+    if (!isBackendBackedTrip) {
+      return undefined;
     }
 
-    refreshActiveBooking().catch(() => {
-      // Keep the last known trip state on screen if refresh fails.
-    });
-  }, [activeBookingId, activeBookingSource, refreshActiveBooking]);
+    const refreshTrip = () => {
+      refreshActiveBooking().catch(() => {
+        // Keep the last known trip state on screen if refresh fails.
+      });
+    };
+
+    refreshTrip();
+    const interval = setInterval(refreshTrip, LIVE_REFRESH_MS);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [isBackendBackedTrip, refreshActiveBooking]);
 
   useEffect(() => {
+    if (isBackendBackedTrip || !activeTrip) {
+      return undefined;
+    }
+
     const interval = setInterval(() => {
-      setTripProgress((previous) => {
+      setLocalTripProgress((previous) => {
         if (previous >= 0.92) {
           clearInterval(interval);
           return 0.92;
         }
+
         return previous + 0.05;
       });
     }, 3000);
 
-    const timeout = setTimeout(() => {
-      if (activeTrip?.midTripOffer) {
-        setShowMidTripAlert(true);
-      }
-    }, 5000);
+    return () => {
+      clearInterval(interval);
+    };
+  }, [activeTrip, isBackendBackedTrip]);
 
+  useEffect(() => {
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.12, duration: 800, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
       ])
     ).start();
+  }, [pulseAnim]);
 
-    return () => {
-      clearInterval(interval);
-      clearTimeout(timeout);
-    };
-  }, [activeTrip, pulseAnim]);
+  useEffect(() => {
+    if (!activeOfferKey) {
+      setShowMidTripAlert(false);
+      return;
+    }
+
+    if (dismissedOfferKey !== activeOfferKey) {
+      setShowMidTripAlert(true);
+    }
+  }, [activeOfferKey, dismissedOfferKey]);
 
   if (!activeTrip) {
     return (
@@ -85,38 +112,38 @@ export default function ActiveTripScreen({ navigation }) {
     );
   }
 
-  const kmLeft = Math.max(Math.round((1 - tripProgress) * activeTrip.distanceKm), 1);
-  const etaLeft = Math.max(Math.round((1 - tripProgress) * activeTrip.durationMinutes), 3);
+  const tripProgress =
+    isBackendBackedTrip && typeof activeTrip.progress === 'number'
+      ? activeTrip.progress
+      : localTripProgress;
+  const kmLeft =
+    typeof activeTrip.remainingDistanceKm === 'number'
+      ? Math.max(Math.round(activeTrip.remainingDistanceKm), 0)
+      : Math.max(Math.round((1 - tripProgress) * activeTrip.distanceKm), 1);
+  const etaLeft =
+    typeof activeTrip.etaMinutes === 'number'
+      ? Math.max(activeTrip.etaMinutes, 0)
+      : Math.max(Math.round((1 - tripProgress) * activeTrip.durationMinutes), 3);
+  const tripTitle =
+    activeTrip.phaseLabel ||
+    (activeTrip.status === 'completed' ? 'Trip completed' : 'Trip in progress');
+  const liveUpdateText = isBackendBackedTrip
+    ? `Live updates every ${LIVE_REFRESH_MS / 1000}s`
+    : 'Demo trip simulation';
 
   return (
     <View style={styles.container}>
       <View style={styles.mapArea}>
-        <View style={styles.mapPlaceholder}>
-          <View style={styles.road1} />
-          <View style={styles.road2} />
+        <RouteMap
+          style={styles.mapPlaceholder}
+          pickupLocation={activeTrip.pickupLocation}
+          dropoffLocation={activeTrip.dropoffLocation}
+          routeGeometry={activeTrip.routeGeometry}
+          distanceLabel={`${kmLeft} km left`}
+        />
 
-          <View style={styles.routePath}>
-            <View style={[styles.routeFilled, { width: `${tripProgress * 100}%` }]} />
-          </View>
-
-          <View style={[styles.marker, styles.pickupMarker]}>
-            <View style={styles.markerDot} />
-            <Text style={styles.markerLabel}>Pickup</Text>
-          </View>
-
-          <View style={[styles.driverCar, { left: `${20 + tripProgress * 55}%` }]}>
-            <Car size={18} color={COLORS.textInverse} />
-          </View>
-
-          <View style={[styles.marker, styles.dropoffMarker]}>
-            <View style={[styles.markerDot, { backgroundColor: COLORS.error }]} />
-            <Text style={styles.markerLabel}>Drop</Text>
-          </View>
-
-          <View style={styles.distanceBadge}>
-            <MapPin size={12} color={COLORS.primary} />
-            <Text style={styles.distanceText}>{kmLeft} km left</Text>
-          </View>
+        <View style={styles.routePath}>
+          <View style={[styles.routeFilled, { width: `${tripProgress * 100}%` }]} />
         </View>
 
         <View style={styles.topControls}>
@@ -149,9 +176,16 @@ export default function ActiveTripScreen({ navigation }) {
           </View>
           <View style={styles.alertContent}>
             <Text style={styles.alertTitle}>{activeTrip.midTripOffer.title}</Text>
-            <Text style={styles.alertSubtitle}>Your fare reduces by ₹{activeTrip.midTripOffer.discount}</Text>
+            <Text style={styles.alertSubtitle}>
+              Your fare reduces by Rs. {activeTrip.midTripOffer.discount}
+            </Text>
           </View>
-          <TouchableOpacity onPress={() => setShowMidTripAlert(false)}>
+          <TouchableOpacity
+            onPress={() => {
+              setDismissedOfferKey(activeOfferKey);
+              setShowMidTripAlert(false);
+            }}
+          >
             <X size={18} color={COLORS.textTertiary} />
           </TouchableOpacity>
         </View>
@@ -168,7 +202,10 @@ export default function ActiveTripScreen({ navigation }) {
         </View>
 
         <View style={styles.tripHeader}>
-          <Text style={styles.tripTitle}>Trip in progress</Text>
+          <View>
+            <Text style={styles.tripTitle}>{tripTitle}</Text>
+            <Text style={styles.tripSubtitle}>{liveUpdateText}</Text>
+          </View>
           <View style={styles.rideBadge}>
             <Users size={12} color={COLORS.success} />
             <Text style={styles.rideType}>{activeTrip.rideType === 'solo' ? 'Solo' : 'Shared Ride'}</Text>
@@ -184,8 +221,11 @@ export default function ActiveTripScreen({ navigation }) {
             <View style={styles.driverMeta}>
               <Star size={12} color={COLORS.star} fill={COLORS.star} />
               <Text style={styles.driverRating}>{activeTrip.driver.rating}</Text>
-              <Text style={styles.driverTrips}>• {activeTrip.driver.trips} trips</Text>
+              <Text style={styles.driverTrips}>| {activeTrip.driver.trips} trips</Text>
             </View>
+            {activeTrip.driver.phone ? (
+              <Text style={styles.driverPhone}>Test driver login: {activeTrip.driver.phone.replace('+91', '')}</Text>
+            ) : null}
           </View>
           <View style={styles.plateNumber}>
             <Text style={styles.plateText}>{activeTrip.vehicle.plateNumber}</Text>
@@ -196,21 +236,21 @@ export default function ActiveTripScreen({ navigation }) {
           <View style={styles.vehicleBadge}>
             <Car size={14} color={COLORS.primary} />
             <Text style={styles.vehicleText}>
-              {activeTrip.vehicle.name} • {activeTrip.vehicle.color}
+              {activeTrip.vehicle.name} | {activeTrip.vehicle.color}
             </Text>
           </View>
           <View style={styles.routeInfo}>
             <MapPin size={14} color={COLORS.success} />
             <Text style={styles.routeText} numberOfLines={1}>
-              {activeTrip.routeLabel}
+              {activeTrip.nextStopLabel || activeTrip.routeLabel}
             </Text>
           </View>
         </View>
 
         <View style={styles.earningsCard}>
           <Text style={styles.earningsTitle}>Current trip economics</Text>
-          <Text style={styles.earningsLine}>Fare paid: ₹{activeTrip.fareTotal}</Text>
-          <Text style={styles.earningsLine}>Savings unlocked: ₹{activeTrip.fareSavings}</Text>
+          <Text style={styles.earningsLine}>Fare paid: Rs. {activeTrip.fareTotal}</Text>
+          <Text style={styles.earningsLine}>Savings unlocked: Rs. {activeTrip.fareSavings}</Text>
         </View>
 
         <View style={styles.actionRow}>
@@ -271,87 +311,20 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'hidden',
   },
-  road1: {
-    position: 'absolute',
-    top: '50%',
-    left: 0,
-    right: 0,
-    height: 6,
-    backgroundColor: '#FFF',
-  },
-  road2: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: '45%',
-    width: 6,
-    backgroundColor: '#FFF',
-  },
   routePath: {
     position: 'absolute',
-    top: '45%',
+    top: '47%',
     left: '15%',
     width: '70%',
     height: 8,
     borderRadius: 999,
-    backgroundColor: '#CFD8E3',
+    backgroundColor: 'rgba(255,255,255,0.5)',
+    overflow: 'hidden',
   },
   routeFilled: {
     height: 8,
     borderRadius: 999,
     backgroundColor: COLORS.primary,
-  },
-  marker: {
-    position: 'absolute',
-    alignItems: 'center',
-  },
-  pickupMarker: {
-    top: '41%',
-    left: '14%',
-  },
-  dropoffMarker: {
-    top: '41%',
-    right: '13%',
-  },
-  markerDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: COLORS.success,
-    borderWidth: 2,
-    borderColor: COLORS.surface,
-  },
-  markerLabel: {
-    marginTop: 4,
-    color: COLORS.textPrimary,
-    fontSize: SIZES.xs,
-    ...FONTS.medium,
-  },
-  driverCar: {
-    position: 'absolute',
-    top: '42%',
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  distanceBadge: {
-    position: 'absolute',
-    top: 64,
-    right: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.94)',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  distanceText: {
-    color: COLORS.textPrimary,
-    ...FONTS.medium,
   },
   topControls: {
     position: 'absolute',
@@ -474,6 +447,11 @@ const styles = StyleSheet.create({
     fontSize: SIZES.xxl,
     ...FONTS.bold,
   },
+  tripSubtitle: {
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    ...FONTS.regular,
+  },
   rideBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -528,6 +506,11 @@ const styles = StyleSheet.create({
   driverTrips: {
     color: COLORS.textTertiary,
     ...FONTS.medium,
+  },
+  driverPhone: {
+    color: COLORS.primary,
+    marginTop: 6,
+    ...FONTS.semiBold,
   },
   plateNumber: {
     paddingHorizontal: 10,

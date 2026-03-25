@@ -1,5 +1,9 @@
 const seedCandidates = require('../data/seedCandidates');
 const db = require('../config/db');
+const {
+  buildRoutePreview,
+  ensureCoordinatePayload,
+} = require('./mappingService');
 
 function toNumber(value) {
   return Number(value || 0);
@@ -12,7 +16,12 @@ function normalizeLocation(value, fallback) {
 function corridorFromLabels(pickup, dropoff) {
   const normalized = `${pickup} ${dropoff}`.toLowerCase();
 
-  if (normalized.includes('connaught') || normalized.includes('rajiv') || normalized.includes('akshardham') || normalized.includes('noida')) {
+  if (
+    normalized.includes('connaught') ||
+    normalized.includes('rajiv') ||
+    normalized.includes('akshardham') ||
+    normalized.includes('noida')
+  ) {
     return {
       corridorId: 'delhi_cp_noida',
       corridorLabel: 'Connaught Place -> East Delhi / Noida',
@@ -51,6 +60,13 @@ function buildRideRequest(payload) {
   const pickup = normalizeLocation(payload.pickup, 'Connaught Place, New Delhi');
   const dropoff = normalizeLocation(payload.dropoff, 'Akshardham Temple, Delhi');
   const corridor = corridorFromLabels(pickup, dropoff);
+  const pickupLocation = ensureCoordinatePayload(payload.pickupLocation, pickup);
+  const dropoffLocation = ensureCoordinatePayload(payload.dropoffLocation, dropoff);
+  const routeDistanceKm = toNumber(payload.route?.distanceKm);
+  const routeDurationSeconds = Number(payload.route?.durationSeconds || 0);
+  const routeDurationMinutes = routeDurationSeconds
+    ? Math.max(Math.round(routeDurationSeconds / 60), 1)
+    : Number(payload.route?.durationMinutes || corridor.durationMinutes);
 
   return {
     id: `req_${Date.now()}`,
@@ -65,8 +81,19 @@ function buildRideRequest(payload) {
     direction: corridor.direction,
     originKm: corridor.originKm,
     destinationKm: corridor.destinationKm,
-    distanceKm: corridor.distanceKm,
-    durationMinutes: corridor.durationMinutes,
+    distanceKm: routeDistanceKm || corridor.distanceKm,
+    durationMinutes: routeDurationMinutes,
+    pickupLocation,
+    dropoffLocation,
+    route: payload.route
+      ? {
+          distanceKm: routeDistanceKm || corridor.distanceKm,
+          durationMinutes: routeDurationMinutes,
+          durationSeconds: routeDurationSeconds || routeDurationMinutes * 60,
+          geometry: payload.route.geometry || null,
+          source: payload.route.source || 'client',
+        }
+      : null,
   };
 }
 
@@ -90,15 +117,22 @@ async function persistRideRequest(request, options = {}) {
       corridor_id,
       pickup_label,
       dropoff_label,
+      pickup_lat,
+      pickup_lng,
+      dropoff_lat,
+      dropoff_lng,
       origin_km,
       destination_km,
+      route_distance_meters,
+      route_duration_seconds,
+      route_geometry,
       ride_type,
       seats_required,
       allow_mid_trip_pickup,
       departure_time,
       status
     )
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'searching')
+    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, 'searching')
     returning id
   `;
 
@@ -107,8 +141,15 @@ async function persistRideRequest(request, options = {}) {
     corridorId,
     request.pickup,
     request.dropoff,
+    request.pickupLocation?.coordinates?.latitude ?? null,
+    request.pickupLocation?.coordinates?.longitude ?? null,
+    request.dropoffLocation?.coordinates?.latitude ?? null,
+    request.dropoffLocation?.coordinates?.longitude ?? null,
     request.originKm,
     request.destinationKm,
+    request.route?.distanceKm ? Math.round(request.route.distanceKm * 1000) : null,
+    request.route?.durationSeconds || null,
+    request.route?.geometry ? JSON.stringify(request.route.geometry) : null,
     request.rideType,
     request.seatsRequired,
     request.allowMidTripPickup,
@@ -160,9 +201,9 @@ function vehicleVariants(candidate, overlapRatio) {
       distance: `${candidate.available_seats * 120} m`,
       eta: `${candidate.vehicle_eta_minutes} min`,
       seats: candidate.available_seats,
-      fare: `₹${baseFare}`,
+      fare: `Rs. ${baseFare}`,
       fareValue: baseFare,
-      farePerKm: `₹${baseRatePerKm}/km`,
+      farePerKm: `Rs. ${baseRatePerKm}/km`,
       driver: {
         name: candidate.driver_name,
         rating: toNumber(candidate.driver_rating),
@@ -177,9 +218,9 @@ function vehicleVariants(candidate, overlapRatio) {
       distance: `${candidate.available_seats * 160} m`,
       eta: `${candidate.vehicle_eta_minutes + 2} min`,
       seats: Math.max(candidate.available_seats, 3),
-      fare: `₹${baseFare + 60}`,
+      fare: `Rs. ${baseFare + 60}`,
       fareValue: baseFare + 60,
-      farePerKm: `₹${baseRatePerKm + 2}/km`,
+      farePerKm: `Rs. ${baseRatePerKm + 2}/km`,
       driver: {
         name: candidate.driver_name,
         rating: toNumber(candidate.driver_rating),
@@ -187,6 +228,43 @@ function vehicleVariants(candidate, overlapRatio) {
       },
     },
   ];
+}
+
+function buildMatch(request, candidate) {
+  const metrics = overlapScore(request, candidate);
+  const soloFareValue = toNumber(candidate.base_solo_fare);
+  const sharedFareValue = Math.round(soloFareValue * (1 - metrics.overlapRatio * 0.4));
+  const savingsValue = Math.max(soloFareValue - sharedFareValue, 60);
+
+  return {
+    id: candidate.id,
+    requestId: request.id,
+    passenger: {
+      name: 'Compatible corridor rider',
+      rating: 4.8,
+      verified: true,
+      avatar: null,
+    },
+    pickup: candidate.origin_label,
+    dropoff: candidate.destination_label,
+    overlap: Math.round(metrics.overlapRatio * 100),
+    overlapRatio: metrics.overlapRatio,
+    overlapKm: metrics.overlapKm,
+    savings: `Rs. ${savingsValue}`,
+    savingsValue,
+    sharedFare: `Rs. ${sharedFareValue}`,
+    sharedFareValue,
+    soloFare: `Rs. ${soloFareValue}`,
+    soloFareValue,
+    eta: `${candidate.vehicle_eta_minutes} min`,
+    detour: `+${metrics.detourMinutes} min`,
+    detourMinutes: metrics.detourMinutes,
+    score: metrics.score,
+    vehicles: vehicleVariants(candidate, metrics.overlapRatio),
+    driverPoolHeadline: candidate.allow_mid_trip_join
+      ? 'Eligible for dynamic mid-trip pickup'
+      : 'Locked direct ride with driver priority',
+  };
 }
 
 async function fetchCandidateRows(request) {
@@ -233,63 +311,51 @@ async function fetchCandidateRows(request) {
 }
 
 async function previewMatches(payload, options = {}) {
-  const initialRequest = buildRideRequest(payload);
+  const routePreview =
+    payload.route ||
+    (payload.pickupLocation && payload.dropoffLocation
+      ? await buildRoutePreview({
+          pickup: payload.pickupLocation,
+          dropoff: payload.dropoffLocation,
+        })
+      : null);
+  const initialRequest = buildRideRequest({
+    ...payload,
+    route: routePreview,
+  });
   const request = await persistRideRequest(initialRequest, options);
   const candidates = await fetchCandidateRows(request);
-
-  const matches = candidates
-    .filter((candidate) => candidate.available_seats >= request.seatsRequired)
-    .filter((candidate) =>
-      overlapWindow(
-        request.departureTime,
-        new Date(new Date(request.departureTime).getTime() + 20 * 60 * 1000).toISOString(),
-        candidate.departure_window_start,
-        candidate.departure_window_end
-      )
+  const requestWindowEnd = new Date(
+    new Date(request.departureTime).getTime() + 20 * 60 * 1000
+  ).toISOString();
+  const seatCompatibleCandidates = candidates.filter(
+    (candidate) => candidate.available_seats >= request.seatsRequired
+  );
+  const exactWindowCandidates = seatCompatibleCandidates.filter((candidate) =>
+    overlapWindow(
+      request.departureTime,
+      requestWindowEnd,
+      candidate.departure_window_start,
+      candidate.departure_window_end
     )
-    .map((candidate) => {
-      const metrics = overlapScore(request, candidate);
-      const soloFareValue = toNumber(candidate.base_solo_fare);
-      const sharedFareValue = Math.round(soloFareValue * (1 - metrics.overlapRatio * 0.4));
-      const savingsValue = Math.max(soloFareValue - sharedFareValue, 60);
+  );
+  const candidatePool =
+    exactWindowCandidates.length > 0 ? exactWindowCandidates : seatCompatibleCandidates;
 
-      return {
-        id: candidate.id,
-        requestId: request.id,
-        passenger: {
-          name: 'Compatible corridor rider',
-          rating: 4.8,
-          verified: true,
-          avatar: null,
-        },
-        pickup: candidate.origin_label,
-        dropoff: candidate.destination_label,
-        overlap: Math.round(metrics.overlapRatio * 100),
-        overlapRatio: metrics.overlapRatio,
-        overlapKm: metrics.overlapKm,
-        savings: `₹${savingsValue}`,
-        savingsValue,
-        sharedFare: `₹${sharedFareValue}`,
-        sharedFareValue,
-        soloFare: `₹${soloFareValue}`,
-        soloFareValue,
-        eta: `${candidate.vehicle_eta_minutes} min`,
-        detour: `+${metrics.detourMinutes} min`,
-        detourMinutes: metrics.detourMinutes,
-        score: metrics.score,
-        vehicles: vehicleVariants(candidate, metrics.overlapRatio),
-        driverPoolHeadline: candidate.allow_mid_trip_join
-          ? 'Eligible for dynamic mid-trip pickup'
-          : 'Locked direct ride with driver priority',
-      };
-    })
+  const matches = candidatePool
+    .map((candidate) => buildMatch(request, candidate))
     .filter((match) => match.overlapRatio >= 0.35)
     .sort((left, right) => right.score - left.score);
 
   return {
     request,
     matches,
-    source: matches.length > 0 ? 'database-or-seed' : 'empty',
+    source:
+      matches.length === 0
+        ? 'empty'
+        : exactWindowCandidates.length > 0
+          ? 'database-or-seed'
+          : 'relaxed-time-window',
   };
 }
 

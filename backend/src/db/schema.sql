@@ -24,6 +24,7 @@ create table if not exists drivers (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
   full_name text not null,
+  is_online boolean not null default true,
   rating numeric(3,2) not null default 5.0,
   trip_count integer not null default 0,
   commission_percent numeric(5,2) not null default 12.5,
@@ -51,8 +52,15 @@ create table if not exists ride_requests (
   corridor_id text references corridors(id),
   pickup_label text not null,
   dropoff_label text not null,
+  pickup_lat numeric(10,6),
+  pickup_lng numeric(10,6),
+  dropoff_lat numeric(10,6),
+  dropoff_lng numeric(10,6),
   origin_km numeric(8,2) not null,
   destination_km numeric(8,2) not null,
+  route_distance_meters integer,
+  route_duration_seconds integer,
+  route_geometry jsonb,
   ride_type text not null,
   seats_required integer not null default 1,
   allow_mid_trip_pickup boolean not null default true,
@@ -109,3 +117,15 @@ create table if not exists user_sessions (
   last_seen_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+
+alter table drivers
+  add column if not exists is_online boolean not null default true;
+
+alter table ride_requests
+  add column if not exists pickup_lat numeric(10,6),
+  add column if not exists pickup_lng numeric(10,6),
+  add column if not exists dropoff_lat numeric(10,6),
+  add column if not exists dropoff_lng numeric(10,6),
+  add column if not exists route_distance_meters integer,
+  add column if not exists route_duration_seconds integer,
+  add column if not exists route_geometry jsonb;

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react-native';
 import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
 import { useRide } from '../context/RideContext';
+import RouteMap from '../components/RouteMap';
 
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -42,14 +43,15 @@ export default function VehicleSelectScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <View style={styles.mapSection}>
-        <View style={styles.mapPlaceholder}>
-          <View style={styles.mapRoad} />
-          <View style={styles.mapRoad2} />
-          <View style={styles.routeLine} />
-          <View style={styles.driverIcon}>
-            <Car size={16} color={COLORS.primary} />
-          </View>
-        </View>
+        <RouteMap
+          style={styles.mapPlaceholder}
+          pickupLocation={rideRequest?.pickupLocation || null}
+          dropoffLocation={rideRequest?.dropoffLocation || null}
+          routeGeometry={rideRequest?.route?.geometry || null}
+          distanceLabel={
+            rideRequest?.distanceKm ? `${Math.round(rideRequest.distanceKm)} km` : null
+          }
+        />
 
         <View style={styles.topBar}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -191,44 +193,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8ECF0',
     position: 'relative',
     overflow: 'hidden',
-  },
-  mapRoad: {
-    position: 'absolute',
-    top: '40%',
-    left: 0,
-    right: 0,
-    height: 6,
-    backgroundColor: '#FFF',
-  },
-  mapRoad2: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: '50%',
-    width: 6,
-    backgroundColor: '#FFF',
-  },
-  routeLine: {
-    position: 'absolute',
-    top: '30%',
-    left: '20%',
-    width: '60%',
-    height: 4,
-    backgroundColor: COLORS.primary,
-    borderRadius: 2,
-    transform: [{ rotate: '15deg' }],
-  },
-  driverIcon: {
-    position: 'absolute',
-    top: '35%',
-    left: '40%',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOWS.medium,
   },
   topBar: {
     position: 'absolute',

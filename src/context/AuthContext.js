@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   fetchSession,
   hasApiBaseUrl,
@@ -6,13 +6,79 @@ import {
   requestOtp as requestOtpApi,
   verifyOtp as verifyOtpApi,
 } from '../services/api';
+import {
+  clearSessionToken,
+  persistSessionToken,
+  readSessionToken,
+} from '../services/sessionStorage';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState(null);
+
+  const clearSession = useCallback(async () => {
+    setSession(null);
+    await clearSessionToken();
+  }, []);
+
+  const syncSession = useCallback(async (token, options = {}) => {
+    const { clearOnFailure = true } = options;
+
+    if (!token || !hasApiBaseUrl) {
+      if (clearOnFailure) {
+        await clearSession();
+      }
+      return null;
+    }
+
+    try {
+      const nextSession = await fetchSession(token);
+      setSession(nextSession);
+      await persistSessionToken(nextSession.token);
+      return nextSession;
+    } catch (sessionError) {
+      if (clearOnFailure) {
+        await clearSession();
+      }
+      throw sessionError;
+    }
+  }, [clearSession]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function restoreSession() {
+      try {
+        const storedToken = await readSessionToken();
+
+        if (!storedToken) {
+          return;
+        }
+
+        await syncSession(storedToken, {
+          clearOnFailure: true,
+        });
+      } catch (sessionError) {
+        if (isMounted) {
+          setError(sessionError.message || 'Session expired. Please sign in again.');
+        }
+      } finally {
+        if (isMounted) {
+          setHydrated(true);
+        }
+      }
+    }
+
+    restoreSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [syncSession]);
 
   const requestOtp = useCallback(async (phone) => {
     setLoading(true);
@@ -37,6 +103,7 @@ export function AuthProvider({ children }) {
     try {
       const nextSession = await verifyOtpApi(phone, code);
       setSession(nextSession);
+      await persistSessionToken(nextSession.token);
       return nextSession;
     } catch (verifyError) {
       const message = verifyError.message || 'Unable to verify OTP right now.';
@@ -56,22 +123,22 @@ export function AuthProvider({ children }) {
     setError(null);
 
     try {
-      const nextSession = await fetchSession(session.token);
-      setSession(nextSession);
+      const nextSession = await syncSession(session.token, {
+        clearOnFailure: true,
+      });
       return nextSession;
     } catch (sessionError) {
-      setSession(null);
       const message = sessionError.message || 'Session expired. Please sign in again.';
       setError(message);
       throw sessionError;
     } finally {
       setLoading(false);
     }
-  }, [session?.token]);
+  }, [session?.token, syncSession]);
 
   const signOut = useCallback(async () => {
     const token = session?.token;
-    setSession(null);
+    await clearSession();
 
     if (!token || !hasApiBaseUrl) {
       return;
@@ -82,11 +149,12 @@ export function AuthProvider({ children }) {
     } catch (_error) {
       // The local session is already cleared.
     }
-  }, [session?.token]);
+  }, [clearSession, session?.token]);
 
   const value = useMemo(
     () => ({
       error,
+      hydrated,
       isAuthenticated: Boolean(session?.token),
       loading,
       refreshSession,
@@ -98,7 +166,7 @@ export function AuthProvider({ children }) {
       user: session?.user || null,
       verifyOtp,
     }),
-    [error, loading, refreshSession, requestOtp, session, signOut, verifyOtp]
+    [error, hydrated, loading, refreshSession, requestOtp, session, signOut, verifyOtp]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

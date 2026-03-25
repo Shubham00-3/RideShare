@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   ScrollView,
   StyleSheet,
@@ -24,6 +25,8 @@ import {
 import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
 import { USER_PROFILE } from '../constants/data';
 import { useRide } from '../context/RideContext';
+import RouteMap from '../components/RouteMap';
+import { fetchRoutePreview, searchPlaces } from '../services/api';
 
 const { height } = Dimensions.get('window');
 
@@ -32,6 +35,50 @@ export default function HomeScreen({ navigation }) {
   const [pickup, setPickup] = useState(searchForm.pickup);
   const [dropoff, setDropoff] = useState(searchForm.dropoff);
   const [selectedType, setSelectedType] = useState(searchForm.rideType);
+  const [pickupLocation, setPickupLocation] = useState(searchForm.pickupLocation || null);
+  const [dropoffLocation, setDropoffLocation] = useState(searchForm.dropoffLocation || null);
+  const [pickupSuggestions, setPickupSuggestions] = useState([]);
+  const [dropoffSuggestions, setDropoffSuggestions] = useState([]);
+  const [activeField, setActiveField] = useState(null);
+  const [routingLoading, setRoutingLoading] = useState(false);
+
+  useEffect(() => {
+    setPickup(searchForm.pickup);
+    setDropoff(searchForm.dropoff);
+    setSelectedType(searchForm.rideType);
+    setPickupLocation(searchForm.pickupLocation || null);
+    setDropoffLocation(searchForm.dropoffLocation || null);
+  }, [searchForm]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(async () => {
+      if (!pickup.trim() || activeField !== 'pickup') {
+        setPickupSuggestions([]);
+        return;
+      }
+
+      const response = await searchPlaces(pickup);
+      setPickupSuggestions(response.items || []);
+    }, 220);
+
+    return () => clearTimeout(timeoutId);
+  }, [activeField, pickup]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(async () => {
+      if (!dropoff.trim() || activeField !== 'dropoff') {
+        setDropoffSuggestions([]);
+        return;
+      }
+
+      const response = await searchPlaces(dropoff, {
+        focusPoint: pickupLocation?.coordinates || null,
+      });
+      setDropoffSuggestions(response.items || []);
+    }, 220);
+
+    return () => clearTimeout(timeoutId);
+  }, [activeField, dropoff, pickupLocation]);
 
   const rideTypes = [
     { id: 'shared', label: 'Shared Ride', icon: Users, savings: 'Save 40%', color: COLORS.success },
@@ -39,42 +86,114 @@ export default function HomeScreen({ navigation }) {
     { id: 'schedule', label: 'Schedule', icon: Calendar, savings: null, color: COLORS.accent },
   ];
 
-  const handleSearch = async () => {
-    await searchRides({
-      pickup,
-      dropoff,
-      rideType: selectedType,
-      allowMidTripPickup: selectedType !== 'solo',
+  const resolveLocation = async (label, currentLocation, focusPoint) => {
+    if (currentLocation?.label === label) {
+      return currentLocation;
+    }
+
+    const response = await searchPlaces(label, {
+      focusPoint,
     });
-    navigation.navigate('RideMatch');
+
+    return response.items?.[0] || null;
+  };
+
+  const handleSearch = async () => {
+    if (!pickup.trim() || !dropoff.trim()) {
+      Alert.alert('Locations needed', 'Pick both pickup and dropoff to build the route preview.');
+      return;
+    }
+
+    try {
+      setRoutingLoading(true);
+      const resolvedPickup = await resolveLocation(pickup, pickupLocation, null);
+      const resolvedDropoff = await resolveLocation(
+        dropoff,
+        dropoffLocation,
+        resolvedPickup?.coordinates || null
+      );
+
+      if (!resolvedPickup || !resolvedDropoff) {
+        Alert.alert('Locations not found', 'Try selecting a suggestion from the search list first.');
+        return;
+      }
+
+      const route = await fetchRoutePreview({
+        pickup: resolvedPickup,
+        dropoff: resolvedDropoff,
+      });
+
+      await searchRides({
+        pickup: resolvedPickup.label,
+        dropoff: resolvedDropoff.label,
+        pickupLocation: resolvedPickup,
+        dropoffLocation: resolvedDropoff,
+        route,
+        rideType: selectedType,
+        allowMidTripPickup: selectedType !== 'solo',
+      });
+      navigation.navigate('RideMatch');
+    } catch (searchError) {
+      Alert.alert('Search failed', searchError.message || 'Unable to search rides right now.');
+    } finally {
+      setRoutingLoading(false);
+    }
+  };
+
+  const renderSuggestions = (field, items) => {
+    if (activeField !== field || items.length === 0) {
+      return null;
+    }
+
+    return (
+      <View style={styles.suggestionList}>
+        {items.map((item) => (
+          <TouchableOpacity
+            key={item.id}
+            style={styles.suggestionRow}
+            onPress={() => {
+              if (field === 'pickup') {
+                setPickup(item.label);
+                setPickupLocation(item);
+                setPickupSuggestions([]);
+              } else {
+                setDropoff(item.label);
+                setDropoffLocation(item);
+                setDropoffSuggestions([]);
+              }
+
+              setActiveField(null);
+            }}
+          >
+            <View style={styles.suggestionIcon}>
+              <MapPin size={14} color={COLORS.primary} />
+            </View>
+            <View style={styles.suggestionInfo}>
+              <Text style={styles.suggestionLabel}>{item.name}</Text>
+              <Text style={styles.suggestionMeta}>{item.label}</Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.mapContainer}>
-        <View style={styles.mapPlaceholder}>
-          <View style={styles.mapGrid}>
-            {Array.from({ length: 20 }).map((_, index) => (
-              <View key={index} style={styles.mapGridLine} />
-            ))}
-          </View>
-          <View style={styles.mapRoad1} />
-          <View style={styles.mapRoad2} />
-          {[
-            { top: '30%', left: '25%' },
-            { top: '45%', left: '60%' },
-            { top: '55%', left: '35%' },
-            { top: '25%', left: '70%' },
-          ].map((pos, index) => (
-            <View key={index} style={[styles.driverMarker, { top: pos.top, left: pos.left }]}>
-              <Car size={14} color={COLORS.primary} />
-            </View>
-          ))}
-          <View style={styles.centerMarker}>
-            <View style={styles.centerMarkerDot} />
-            <View style={styles.centerMarkerRing} />
-          </View>
-        </View>
+        <RouteMap
+          style={styles.mapPlaceholder}
+          pickupLocation={pickupLocation || searchForm.pickupLocation || null}
+          dropoffLocation={dropoffLocation || searchForm.dropoffLocation || null}
+          routeGeometry={
+            pickupLocation?.coordinates && dropoffLocation?.coordinates
+              ? null
+              : searchForm.route?.geometry || null
+          }
+          distanceLabel={
+            searchForm.distanceKm ? `${Math.round(searchForm.distanceKm)} km corridor` : null
+          }
+        />
 
         <View style={styles.topBar}>
           <View style={styles.locationBadge}>
@@ -113,26 +232,42 @@ export default function HomeScreen({ navigation }) {
             <View style={styles.redDot} />
           </View>
           <View style={styles.inputs}>
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="Pickup location"
-                placeholderTextColor={COLORS.textTertiary}
-                value={pickup}
-                onChangeText={setPickup}
-              />
-              <MapPin size={18} color={COLORS.textTertiary} />
+            <View style={styles.inputBlock}>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Pickup location"
+                  placeholderTextColor={COLORS.textTertiary}
+                  value={pickup}
+                  onFocus={() => setActiveField('pickup')}
+                  onChangeText={(value) => {
+                    setPickup(value);
+                    setPickupLocation(null);
+                    setActiveField('pickup');
+                  }}
+                />
+                <MapPin size={18} color={COLORS.textTertiary} />
+              </View>
+              {renderSuggestions('pickup', pickupSuggestions)}
             </View>
             <View style={styles.inputDivider} />
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={styles.input}
-                placeholder="Where to?"
-                placeholderTextColor={COLORS.textTertiary}
-                value={dropoff}
-                onChangeText={setDropoff}
-              />
-              <Search size={18} color={COLORS.textTertiary} />
+            <View style={styles.inputBlock}>
+              <View style={styles.inputWrapper}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Where to?"
+                  placeholderTextColor={COLORS.textTertiary}
+                  value={dropoff}
+                  onFocus={() => setActiveField('dropoff')}
+                  onChangeText={(value) => {
+                    setDropoff(value);
+                    setDropoffLocation(null);
+                    setActiveField('dropoff');
+                  }}
+                />
+                <Search size={18} color={COLORS.textTertiary} />
+              </View>
+              {renderSuggestions('dropoff', dropoffSuggestions)}
             </View>
           </View>
         </View>
@@ -192,8 +327,10 @@ export default function HomeScreen({ navigation }) {
               onPress={() => {
                 if (place.label === 'Home') {
                   setPickup(place.address);
+                  setPickupLocation(null);
                 } else {
                   setDropoff(place.address);
+                  setDropoffLocation(null);
                 }
               }}
             >
@@ -213,8 +350,12 @@ export default function HomeScreen({ navigation }) {
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        <TouchableOpacity style={styles.findButton} onPress={handleSearch} disabled={loading}>
-          {loading ? (
+        <TouchableOpacity
+          style={styles.findButton}
+          onPress={handleSearch}
+          disabled={loading || routingLoading}
+        >
+          {loading || routingLoading ? (
             <ActivityIndicator color={COLORS.textInverse} />
           ) : (
             <>
@@ -431,6 +572,9 @@ const styles = StyleSheet.create({
   inputs: {
     flex: 1,
   },
+  inputBlock: {
+    minHeight: 50,
+  },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -445,6 +589,39 @@ const styles = StyleSheet.create({
   inputDivider: {
     height: 1,
     backgroundColor: COLORS.borderLight,
+  },
+  suggestionList: {
+    gap: 8,
+    paddingBottom: 8,
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: SIZES.radius_lg,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  suggestionIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: `${COLORS.primary}12`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestionInfo: {
+    flex: 1,
+  },
+  suggestionLabel: {
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
+  },
+  suggestionMeta: {
+    color: COLORS.textSecondary,
+    marginTop: 2,
+    ...FONTS.regular,
   },
   rideTypesScroll: {
     marginTop: 18,

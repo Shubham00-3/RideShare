@@ -1,5 +1,57 @@
 import { MOCK_MATCHES, MOCK_VEHICLES, USER_PROFILE } from '../constants/data';
 
+const MOCK_PLACES = [
+  {
+    id: 'connaught_place',
+    name: 'Connaught Place',
+    label: 'Connaught Place, New Delhi',
+    city: 'New Delhi',
+    coordinates: { latitude: 28.6315, longitude: 77.2167 },
+  },
+  {
+    id: 'akshardham_temple',
+    name: 'Akshardham Temple',
+    label: 'Akshardham Temple, Delhi',
+    city: 'Delhi',
+    coordinates: { latitude: 28.6127, longitude: 77.2773 },
+  },
+  {
+    id: 'rajiv_chowk',
+    name: 'Rajiv Chowk Metro Station',
+    label: 'Rajiv Chowk Metro Station, New Delhi',
+    city: 'New Delhi',
+    coordinates: { latitude: 28.6328, longitude: 77.2197 },
+  },
+  {
+    id: 'india_gate',
+    name: 'India Gate',
+    label: 'India Gate, New Delhi',
+    city: 'New Delhi',
+    coordinates: { latitude: 28.6129, longitude: 77.2295 },
+  },
+  {
+    id: 'cyber_city',
+    name: 'DLF Cyber City',
+    label: 'DLF Cyber City, Gurgaon',
+    city: 'Gurgaon',
+    coordinates: { latitude: 28.4959, longitude: 77.0891 },
+  },
+  {
+    id: 'noida_sector_62',
+    name: 'Sector 62',
+    label: 'Sector 62, Noida',
+    city: 'Noida',
+    coordinates: { latitude: 28.627, longitude: 77.3649 },
+  },
+  {
+    id: 'noida_sector_18',
+    name: 'Sector 18',
+    label: 'Sector 18, Noida',
+    city: 'Noida',
+    coordinates: { latitude: 28.5707, longitude: 77.3272 },
+  },
+];
+
 function rupees(value) {
   return `₹${Math.round(value)}`;
 }
@@ -14,6 +66,33 @@ function normalizeLocation(value, fallback) {
 
 function inferCorridor(pickup, dropoff) {
   return `${pickup.split(',')[0].trim()} -> ${dropoff.split(',')[0].trim()}`;
+}
+
+function haversineDistanceKm(from, to) {
+  const earthRadiusKm = 6371;
+  const dLat = ((to.latitude - from.latitude) * Math.PI) / 180;
+  const dLon = ((to.longitude - from.longitude) * Math.PI) / 180;
+  const lat1 = (from.latitude * Math.PI) / 180;
+  const lat2 = (to.latitude * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function buildRouteGeometry(pickup, dropoff) {
+  const midpointLatitude = Number((((pickup.latitude + dropoff.latitude) / 2) + 0.018).toFixed(6));
+  const midpointLongitude = Number(((pickup.longitude + dropoff.longitude) / 2).toFixed(6));
+
+  return {
+    type: 'LineString',
+    coordinates: [
+      [pickup.longitude, pickup.latitude],
+      [midpointLongitude, midpointLatitude],
+      [dropoff.longitude, dropoff.latitude],
+    ],
+  };
 }
 
 function buildVehicleOptions(match, rideType) {
@@ -37,18 +116,22 @@ export function buildMockMatchResponse(payload = {}) {
   const pickup = normalizeLocation(payload.pickup, 'Connaught Place, New Delhi');
   const dropoff = normalizeLocation(payload.dropoff, 'Akshardham Temple, Delhi');
   const rideType = payload.rideType || 'shared';
-  const requestDistanceKm = 15;
+  const requestDistanceKm = payload.route?.distanceKm || 15;
+  const requestDurationMinutes = payload.route?.durationMinutes || 35;
 
   const request = {
     id: `req_${Date.now()}`,
     pickup,
     dropoff,
+    pickupLocation: payload.pickupLocation || null,
+    dropoffLocation: payload.dropoffLocation || null,
     rideType,
     seatsRequired: payload.seatsRequired || 1,
     allowMidTripPickup: payload.allowMidTripPickup ?? true,
     departureTime: payload.departureTime || new Date(Date.now() + 15 * 60 * 1000).toISOString(),
     distanceKm: requestDistanceKm,
-    durationMinutes: 35,
+    durationMinutes: requestDurationMinutes,
+    route: payload.route || null,
     corridorLabel: inferCorridor(pickup, dropoff),
   };
 
@@ -135,11 +218,18 @@ export function buildMockBooking({ request, match, vehicle, quote, options }) {
       status: 'driver_arriving',
       pickup: request.pickup,
       dropoff: request.dropoff,
+      pickupLocation: request.pickupLocation || null,
+      dropoffLocation: request.dropoffLocation || null,
       rideType: request.rideType,
       allowMidTripPickup: options?.allowMidTripPickup ?? true,
       etaMinutes,
       durationMinutes: request.durationMinutes,
       distanceKm: request.distanceKm,
+      routeGeometry: request.route?.geometry || null,
+      routeDurationSeconds: request.route?.durationSeconds || request.durationMinutes * 60,
+      routeDistanceMeters: request.route?.distanceKm
+        ? Math.round(request.route.distanceKm * 1000)
+        : Math.round(request.distanceKm * 1000),
       fareTotal: quote.totals.total,
       fareSavings: quote.totals.estimatedSavings,
       routeLabel: `${request.pickup.split(',')[0]} -> ${request.dropoff.split(',')[0]}`,
@@ -166,5 +256,37 @@ export function buildMockBooking({ request, match, vehicle, quote, options }) {
           }
         : null,
     },
+  };
+}
+
+export function buildMockPlaceResults(query) {
+  const normalizedQuery = normalizeLocation(query, '').toLowerCase();
+
+  return MOCK_PLACES.filter((place) => {
+    if (!normalizedQuery) {
+      return true;
+    }
+
+    return `${place.name} ${place.label} ${place.city}`.toLowerCase().includes(normalizedQuery);
+  }).slice(0, 6);
+}
+
+export function buildMockRoutePreview({ pickup, dropoff }) {
+  const fallbackPickup = pickup || MOCK_PLACES[0];
+  const fallbackDropoff = dropoff || MOCK_PLACES[1];
+  const distanceKm = Number(
+    Math.max(
+      haversineDistanceKm(fallbackPickup.coordinates, fallbackDropoff.coordinates) * 1.24,
+      1.2
+    ).toFixed(1)
+  );
+  const durationMinutes = Math.max(Math.round(distanceKm * 2.6), 8);
+
+  return {
+    distanceKm,
+    durationMinutes,
+    durationSeconds: durationMinutes * 60,
+    geometry: buildRouteGeometry(fallbackPickup.coordinates, fallbackDropoff.coordinates),
+    source: 'mock',
   };
 }

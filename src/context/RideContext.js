@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useAuth } from './AuthContext';
 import {
   confirmRideBooking,
@@ -14,6 +14,9 @@ const RideContext = createContext(null);
 const DEFAULT_SEARCH = {
   pickup: 'Connaught Place, New Delhi',
   dropoff: 'Akshardham Temple, Delhi',
+  pickupLocation: null,
+  dropoffLocation: null,
+  route: null,
   rideType: 'shared',
   seatsRequired: 1,
   allowMidTripPickup: true,
@@ -21,7 +24,7 @@ const DEFAULT_SEARCH = {
 };
 
 export function RideProvider({ children }) {
-  const { token } = useAuth();
+  const { signOut, token } = useAuth();
   const [searchForm, setSearchForm] = useState(DEFAULT_SEARCH);
   const [rideRequest, setRideRequest] = useState(null);
   const [matches, setMatches] = useState([]);
@@ -35,6 +38,25 @@ export function RideProvider({ children }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  useEffect(() => {
+    if (token) {
+      return;
+    }
+
+    setSearchForm(DEFAULT_SEARCH);
+    setRideRequest(null);
+    setMatches([]);
+    setSelectedMatch(null);
+    setSelectedVehicle(null);
+    setQuote(null);
+    setActiveTrip(null);
+    setActiveBookingId(null);
+    setActiveBookingSource(null);
+    setBookingHistory([]);
+    setError(null);
+    setLoading(false);
+  }, [token]);
+
   const searchRides = useCallback(async (input) => {
     const nextSearch = {
       ...DEFAULT_SEARCH,
@@ -47,7 +69,7 @@ export function RideProvider({ children }) {
     try {
       const response = await previewRideMatches(nextSearch, token);
 
-      setSearchForm(nextSearch);
+      setSearchForm(response.request || nextSearch);
       setRideRequest(response.request);
       setMatches(response.matches);
       setSelectedMatch(response.matches[0] ?? null);
@@ -156,13 +178,17 @@ export function RideProvider({ children }) {
       setActiveTrip(booking.trip);
       return booking;
     } catch (bookingError) {
+      if (bookingError.statusCode === 401) {
+        await signOut();
+      }
+
       const message = bookingError.message || 'Unable to refresh trip right now.';
       setError(message);
       throw bookingError;
     } finally {
       setLoading(false);
     }
-  }, [activeBookingId, token]);
+  }, [activeBookingId, signOut, token]);
 
   const refreshBookingHistory = useCallback(async () => {
     if (!token || !hasApiBaseUrl) {
@@ -179,13 +205,17 @@ export function RideProvider({ children }) {
       setBookingHistory(items);
       return items;
     } catch (historyError) {
+      if (historyError.statusCode === 401) {
+        await signOut();
+      }
+
       const message = historyError.message || 'Unable to load trip history right now.';
       setError(message);
       throw historyError;
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [signOut, token]);
 
   const value = useMemo(
     () => ({

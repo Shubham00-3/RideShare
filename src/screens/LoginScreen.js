@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -23,20 +24,21 @@ export default function LoginScreen() {
   const otpRefs = useRef([]);
 
   const formattedOtp = useMemo(() => otp.join(''), [otp]);
+  const normalizedPhone = useMemo(() => phone.replace(/\D/g, ''), [phone]);
 
   const handleSendOTP = async () => {
-    if (phone.length < 10 || loading) {
+    if (normalizedPhone.length < 10 || loading) {
       return;
     }
 
     try {
       setError(null);
-      const response = await requestOtp(phone);
-      setMaskedPhone(response.maskedPhone || `+91 ${phone}`);
+      const response = await requestOtp(normalizedPhone);
+      setMaskedPhone(response.maskedPhone || `+91 ${normalizedPhone}`);
       setDevOtp(response.devOtp || null);
       setStep('otp');
-    } catch (_error) {
-      // Shared auth state already exposes the message.
+    } catch (requestError) {
+      Alert.alert('Unable to send OTP', requestError.message || 'Please try again.');
     }
   };
 
@@ -49,9 +51,9 @@ export default function LoginScreen() {
 
     try {
       setError(null);
-      await verifyOtp(phone, code);
-    } catch (_error) {
-      // Shared auth state already exposes the message.
+      await verifyOtp(normalizedPhone, code);
+    } catch (verifyError) {
+      Alert.alert('Unable to verify OTP', verifyError.message || 'Please try again.');
     }
   };
 
@@ -114,17 +116,17 @@ export default function LoginScreen() {
               keyboardType="phone-pad"
               maxLength={10}
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={(text) => setPhone(text.replace(/\D/g, ''))}
             />
           </View>
 
           <TouchableOpacity
             style={[
               styles.primaryButton,
-              (phone.length < 10 || loading) && styles.buttonDisabled,
+              (normalizedPhone.length < 10 || loading) && styles.buttonDisabled,
             ]}
             onPress={handleSendOTP}
-            disabled={phone.length < 10 || loading}
+            disabled={normalizedPhone.length < 10 || loading}
           >
             {loading ? (
               <ActivityIndicator color={COLORS.textInverse} />
@@ -147,7 +149,7 @@ export default function LoginScreen() {
         <View style={styles.formContainer}>
           <Text style={styles.formTitle}>Verify OTP</Text>
           <Text style={styles.formSubtitle}>
-            We sent a 6-digit code to {maskedPhone || `+91 ${phone}`}
+            We sent a 6-digit code to {maskedPhone || `+91 ${normalizedPhone}`}
           </Text>
 
           <View style={styles.otpContainer}>

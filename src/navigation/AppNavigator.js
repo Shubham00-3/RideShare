@@ -3,9 +3,9 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
-import { View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { Home, Clock, User, Car } from 'lucide-react-native';
-import { COLORS } from '../constants/theme';
+import { COLORS, FONTS, SIZES } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
 
 // Screens
@@ -83,7 +83,17 @@ function MainTabs() {
 }
 
 export default function AppNavigator() {
-  const { isAuthenticated } = useAuth();
+  const { hydrated, isAuthenticated } = useAuth();
+
+  if (!hydrated) {
+    return (
+      <View style={styles.loadingScreen}>
+        <StatusBar style="light" />
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Restoring your session...</Text>
+      </View>
+    );
+  }
 
   return (
     <NavigationContainer>
@@ -113,3 +123,18 @@ export default function AppNavigator() {
     </NavigationContainer>
   );
 }
+
+const styles = {
+  loadingScreen: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+  },
+  loadingText: {
+    color: COLORS.textSecondary,
+    fontSize: SIZES.md,
+    ...FONTS.medium,
+  },
+};

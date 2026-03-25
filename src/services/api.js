@@ -1,10 +1,44 @@
 import {
   buildMockBooking,
   buildMockMatchResponse,
+  buildMockPlaceResults,
   buildMockQuote,
+  buildMockRoutePreview,
 } from './mockBackend';
+import { Platform } from 'react-native';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL;
+const REQUEST_TIMEOUT_MS = 8000;
+const configuredApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim() || '';
+
+function resolveApiBaseUrl() {
+  if (!configuredApiBaseUrl) {
+    return '';
+  }
+
+  if (Platform.OS === 'android') {
+    return configuredApiBaseUrl.replace('127.0.0.1', '10.0.2.2').replace('localhost', '10.0.2.2');
+  }
+
+  return configuredApiBaseUrl;
+}
+
+function buildReachabilityHint(baseUrl) {
+  if (!baseUrl) {
+    return '';
+  }
+
+  if (baseUrl.includes('10.0.2.2')) {
+    return ' If you are testing on a physical phone, use your computer LAN IP instead of 127.0.0.1.';
+  }
+
+  if (baseUrl.includes('127.0.0.1') || baseUrl.includes('localhost')) {
+    return ' If you are testing on a physical phone, set EXPO_PUBLIC_API_BASE_URL to your computer LAN IP and restart Expo.';
+  }
+
+  return '';
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 export const hasApiBaseUrl = Boolean(API_BASE_URL);
 
@@ -13,16 +47,33 @@ async function requestJson(path, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
   };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   if (authToken) {
     headers.Authorization = `Bearer ${authToken}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const reachabilityHint = buildReachabilityHint(API_BASE_URL);
+
+    if (error.name === 'AbortError') {
+      throw new Error(`The API request timed out while reaching ${API_BASE_URL}.${reachabilityHint}`);
+    }
+
+    throw new Error(`Unable to reach the API at ${API_BASE_URL}.${reachabilityHint}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const payload = await response.text();
@@ -35,7 +86,9 @@ async function requestJson(path, options = {}) {
       // Leave the raw response text as the fallback message.
     }
 
-    throw new Error(message);
+    const requestError = new Error(message);
+    requestError.statusCode = response.status;
+    throw requestError;
   }
 
   if (response.status === 204) {
@@ -102,6 +155,53 @@ export async function previewRideMatches(payload, authToken) {
   }
 }
 
+export async function searchPlaces(query, options = {}) {
+  const trimmedQuery = String(query || '').trim();
+
+  if (!trimmedQuery) {
+    return { items: [] };
+  }
+
+  if (!API_BASE_URL) {
+    return {
+      items: buildMockPlaceResults(trimmedQuery),
+    };
+  }
+
+  const params = new URLSearchParams({
+    q: trimmedQuery,
+  });
+
+  if (options.focusPoint?.latitude != null && options.focusPoint?.longitude != null) {
+    params.set('lat', String(options.focusPoint.latitude));
+    params.set('lng', String(options.focusPoint.longitude));
+  }
+
+  try {
+    return await requestJson(`/api/maps/autocomplete?${params.toString()}`, {
+      method: 'GET',
+    });
+  } catch (_error) {
+    return {
+      items: buildMockPlaceResults(trimmedQuery),
+    };
+  }
+}
+
+export async function fetchRoutePreview(payload) {
+  if (!API_BASE_URL) {
+    return buildMockRoutePreview(payload);
+  }
+
+  try {
+    return await requestJson('/api/maps/route', {
+      body: payload,
+    });
+  } catch (_error) {
+    return buildMockRoutePreview(payload);
+  }
+}
+
 export async function fetchBookingQuote(payload, authToken) {
   if (!API_BASE_URL) {
     return buildMockQuote(payload);
@@ -151,5 +251,58 @@ export async function fetchMyBookings(authToken) {
   return requestJson('/api/me/bookings', {
     authToken,
     method: 'GET',
+  });
+}
+
+export async function fetchDriverTrips(authToken) {
+  if (!API_BASE_URL) {
+    return {
+      items: [],
+      summary: {
+        activeTrips: 0,
+        completedTrips: 0,
+        earningsToday: 0,
+      },
+    };
+  }
+
+  return requestJson('/api/driver/me/trips', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function updateDriverSettings(payload, authToken) {
+  if (!API_BASE_URL) {
+    throw new Error('API base URL is not configured.');
+  }
+
+  return requestJson('/api/driver/me/settings', {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function updateDriverTripStatus(bookingId, status, authToken) {
+  if (!API_BASE_URL) {
+    throw new Error('API base URL is not configured.');
+  }
+
+  return requestJson(`/api/driver/bookings/${bookingId}/status`, {
+    authToken,
+    body: { status },
+    method: 'PATCH',
+  });
+}
+
+export async function acceptDriverRequest(requestId, authToken) {
+  if (!API_BASE_URL) {
+    throw new Error('API base URL is not configured.');
+  }
+
+  return requestJson(`/api/driver/requests/${requestId}/accept`, {
+    authToken,
+    method: 'POST',
   });
 }
