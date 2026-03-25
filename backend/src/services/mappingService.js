@@ -1,5 +1,20 @@
 const env = require('../config/env');
 const KNOWN_PLACES = require('../data/knownPlaces');
+const DEFAULT_FOCUS_POINT = {
+  latitude: 28.6139,
+  longitude: 77.209,
+};
+const DEFAULT_COUNTRY_CODES = ['IN'];
+const AUTOCOMPLETE_LAYERS = [
+  'venue',
+  'street',
+  'locality',
+  'neighbourhood',
+  'county',
+  'localadmin',
+  'region',
+  'country',
+];
 
 function toNumber(value) {
   const parsed = Number(value);
@@ -82,6 +97,24 @@ function findFallbackPlaces(query, focusPoint) {
     .sort((left, right) => right.score - left.score)
     .slice(0, 6)
     .map((entry) => buildPlaceResult(entry.place));
+}
+
+function rankFallbackPlaces(query, focusPoint) {
+  const normalizedQuery = normalizeText(query);
+
+  return KNOWN_PLACES.map((place) => {
+    const textScore = scorePlaceMatch(place, normalizedQuery);
+    const focusScore =
+      focusPoint && focusPoint.latitude != null && focusPoint.longitude != null
+        ? Math.max(0, 25 - haversineDistanceKm(place, focusPoint))
+        : 0;
+
+    return {
+      place,
+      score: textScore + focusScore,
+      textScore,
+    };
+  }).sort((left, right) => right.score - left.score);
 }
 
 function findFallbackPlaceByLabel(label) {
@@ -190,8 +223,30 @@ function parsePeliasFeatures(features = []) {
     }));
 }
 
+function blendAutocompleteResults(query, focusPoint, externalPlaces = []) {
+  const rankedFallback = rankFallbackPlaces(query, focusPoint);
+  const strongLocalMatches = rankedFallback
+    .filter((entry) => entry.textScore >= 70)
+    .slice(0, 3)
+    .map((entry) => buildPlaceResult(entry.place));
+  const seenKeys = new Set();
+  const merged = [...strongLocalMatches, ...externalPlaces].filter((place) => {
+    const key = normalizeText(place.label || place.name || place.id);
+
+    if (!key || seenKeys.has(key)) {
+      return false;
+    }
+
+    seenKeys.add(key);
+    return true;
+  });
+
+  return merged.slice(0, 6);
+}
+
 async function autocompletePlaces(query, options = {}) {
   const trimmedQuery = String(query || '').trim();
+  const focusPoint = options.focusPoint || DEFAULT_FOCUS_POINT;
 
   if (!trimmedQuery) {
     return [];
@@ -204,22 +259,25 @@ async function autocompletePlaces(query, options = {}) {
   const url = new URL('/v1/autocomplete', env.peliasBaseUrl);
   url.searchParams.set('text', trimmedQuery);
   url.searchParams.set('size', '6');
+  url.searchParams.set('boundary.country', DEFAULT_COUNTRY_CODES.join(','));
+  url.searchParams.set('layers', AUTOCOMPLETE_LAYERS.join(','));
 
   if (env.peliasApiKey) {
     url.searchParams.set('api_key', env.peliasApiKey);
   }
 
-  if (options.focusPoint?.latitude != null && options.focusPoint?.longitude != null) {
-    url.searchParams.set('focus.point.lat', String(options.focusPoint.latitude));
-    url.searchParams.set('focus.point.lon', String(options.focusPoint.longitude));
+  if (focusPoint?.latitude != null && focusPoint?.longitude != null) {
+    url.searchParams.set('focus.point.lat', String(focusPoint.latitude));
+    url.searchParams.set('focus.point.lon', String(focusPoint.longitude));
   }
 
   try {
     const payload = await fetchJson(url.toString());
     const places = parsePeliasFeatures(payload.features);
-    return places.length > 0 ? places : findFallbackPlaces(trimmedQuery, options.focusPoint || null);
+    const blended = blendAutocompleteResults(trimmedQuery, focusPoint, places);
+    return blended.length > 0 ? blended : findFallbackPlaces(trimmedQuery, focusPoint);
   } catch (_error) {
-    return findFallbackPlaces(trimmedQuery, options.focusPoint || null);
+    return findFallbackPlaces(trimmedQuery, focusPoint);
   }
 }
 
