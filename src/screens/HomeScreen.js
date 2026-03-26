@@ -14,6 +14,7 @@ import {
   Calendar,
   Car,
   ChevronRight,
+  Clock,
   MapPin,
   Navigation,
   Search,
@@ -30,11 +31,204 @@ import { fetchRoutePreview, searchPlaces } from '../services/api';
 
 const { height } = Dimensions.get('window');
 
+function addMinutes(date, minutes) {
+  return new Date(date.getTime() + minutes * 60 * 1000);
+}
+
+function startOfDay(date) {
+  const nextDate = new Date(date);
+  nextDate.setHours(0, 0, 0, 0);
+  return nextDate;
+}
+
+function addDays(date, days) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+}
+
+function sameDay(left, right) {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+function withTime(date, hours, minutes) {
+  const nextDate = new Date(date);
+  nextDate.setHours(hours, minutes, 0, 0);
+  return nextDate;
+}
+
+function buildSchedulePresets() {
+  const now = new Date();
+  const tonight = new Date(now);
+  tonight.setHours(20, 0, 0, 0);
+
+  if (tonight.getTime() <= now.getTime()) {
+    tonight.setDate(tonight.getDate() + 1);
+  }
+
+  const tomorrowMorning = new Date(now);
+  tomorrowMorning.setDate(tomorrowMorning.getDate() + 1);
+  tomorrowMorning.setHours(9, 0, 0, 0);
+
+  const tomorrowEvening = new Date(now);
+  tomorrowEvening.setDate(tomorrowEvening.getDate() + 1);
+  tomorrowEvening.setHours(18, 30, 0, 0);
+
+  return [
+    { id: 'soon', label: 'In 30 min', value: addMinutes(now, 30) },
+    { id: 'tonight', label: 'Tonight 8:00 PM', value: tonight },
+    { id: 'tomorrow-morning', label: 'Tomorrow 9:00 AM', value: tomorrowMorning },
+    { id: 'tomorrow-evening', label: 'Tomorrow 6:30 PM', value: tomorrowEvening },
+  ];
+}
+
+function formatDeparture(date) {
+  return new Intl.DateTimeFormat('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+}
+
+function formatScheduleDateChip(date, index) {
+  if (index === 0) {
+    return {
+      label: 'Today',
+      sublabel: new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' }).format(date),
+    };
+  }
+
+  if (index === 1) {
+    return {
+      label: 'Tomorrow',
+      sublabel: new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' }).format(date),
+    };
+  }
+
+  return {
+    label: new Intl.DateTimeFormat('en-IN', { weekday: 'short' }).format(date),
+    sublabel: new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' }).format(date),
+  };
+}
+
+function buildScheduleDateOptions(selectedDeparture) {
+  const anchorDate = startOfDay(new Date());
+
+  return Array.from({ length: 7 }, (_, index) => {
+    const value = addDays(anchorDate, index);
+
+    return {
+      id: `schedule-date-${index}`,
+      value,
+      ...formatScheduleDateChip(value, index),
+      isSelected: sameDay(value, selectedDeparture),
+    };
+  });
+}
+
+function buildScheduleTimeOptions(selectedDeparture) {
+  const slotDefinitions = [
+    { id: '07:00', label: '7:00 AM', hours: 7, minutes: 0 },
+    { id: '08:30', label: '8:30 AM', hours: 8, minutes: 30 },
+    { id: '10:00', label: '10:00 AM', hours: 10, minutes: 0 },
+    { id: '12:00', label: '12:00 PM', hours: 12, minutes: 0 },
+    { id: '02:00', label: '2:00 PM', hours: 14, minutes: 0 },
+    { id: '04:30', label: '4:30 PM', hours: 16, minutes: 30 },
+    { id: '06:30', label: '6:30 PM', hours: 18, minutes: 30 },
+    { id: '08:00', label: '8:00 PM', hours: 20, minutes: 0 },
+    { id: '09:30', label: '9:30 PM', hours: 21, minutes: 30 },
+  ];
+  const now = new Date();
+  const isToday = sameDay(selectedDeparture, now);
+
+  const slots = slotDefinitions
+    .map((slot) => ({
+      ...slot,
+      value: withTime(selectedDeparture, slot.hours, slot.minutes),
+    }))
+    .filter((slot) => !isToday || slot.value.getTime() > now.getTime() + 5 * 60 * 1000);
+
+  if (slots.length > 0) {
+    return slots.map((slot) => ({
+      ...slot,
+      isSelected:
+        slot.hours === selectedDeparture.getHours() &&
+        slot.minutes === selectedDeparture.getMinutes(),
+    }));
+  }
+
+  const fallbackDate = withTime(addDays(selectedDeparture, 1), 8, 0);
+
+  return [
+    {
+      id: 'next-day-08:00',
+      label: 'Next day 8:00 AM',
+      hours: 8,
+      minutes: 0,
+      value: fallbackDate,
+      isSelected:
+        sameDay(fallbackDate, selectedDeparture) &&
+        fallbackDate.getHours() === selectedDeparture.getHours() &&
+        fallbackDate.getMinutes() === selectedDeparture.getMinutes(),
+    },
+  ];
+}
+
+function getScheduledDepartureDate(booking) {
+  const departureTime = booking?.trip?.departureTime;
+
+  if (!departureTime) {
+    return null;
+  }
+
+  const date = new Date(departureTime);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isUpcomingScheduledBooking(booking) {
+  const departureDate = getScheduledDepartureDate(booking);
+  const status = String(booking?.status || booking?.trip?.status || '').toLowerCase();
+  const rideType = String(booking?.trip?.rideType || '').toLowerCase();
+
+  if (!departureDate) {
+    return false;
+  }
+
+  if (rideType !== 'schedule' && status !== 'scheduled') {
+    return false;
+  }
+
+  if (['completed', 'cancelled'].includes(status)) {
+    return false;
+  }
+
+  return departureDate.getTime() >= Date.now();
+}
+
+function formatBookingStatus(status) {
+  const normalized = String(status || 'scheduled').replace(/_/g, ' ');
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 export default function HomeScreen({ navigation }) {
-  const { error, loading, searchForm, searchRides } = useRide();
+  const {
+    activeBookingId,
+    bookingHistory,
+    error,
+    loading,
+    refreshBookingHistory,
+    searchForm,
+    searchRides,
+  } = useRide();
   const [pickup, setPickup] = useState(searchForm.pickup);
   const [dropoff, setDropoff] = useState(searchForm.dropoff);
   const [selectedType, setSelectedType] = useState(searchForm.rideType);
+  const [scheduledDeparture, setScheduledDeparture] = useState(
+    new Date(searchForm.departureTime)
+  );
   const [pickupLocation, setPickupLocation] = useState(searchForm.pickupLocation || null);
   const [dropoffLocation, setDropoffLocation] = useState(searchForm.dropoffLocation || null);
   const [pickupSuggestions, setPickupSuggestions] = useState([]);
@@ -48,6 +242,7 @@ export default function HomeScreen({ navigation }) {
     setSelectedType(searchForm.rideType);
     setPickupLocation(searchForm.pickupLocation || null);
     setDropoffLocation(searchForm.dropoffLocation || null);
+    setScheduledDeparture(new Date(searchForm.departureTime));
   }, [searchForm]);
 
   useEffect(() => {
@@ -80,11 +275,34 @@ export default function HomeScreen({ navigation }) {
     return () => clearTimeout(timeoutId);
   }, [activeField, dropoff, pickupLocation]);
 
+  useEffect(() => {
+    if (selectedType !== 'schedule') {
+      return undefined;
+    }
+
+    refreshBookingHistory().catch(() => {
+      // Shared booking state already exposes any backend error.
+    });
+
+    return undefined;
+  }, [refreshBookingHistory, selectedType]);
+
   const rideTypes = [
     { id: 'shared', label: 'Shared Ride', icon: Users, savings: 'Save 40%', color: COLORS.success },
     { id: 'solo', label: 'Solo Ride', icon: Car, savings: null, color: COLORS.primary },
     { id: 'schedule', label: 'Schedule', icon: Calendar, savings: null, color: COLORS.accent },
   ];
+  const schedulePresets = buildSchedulePresets();
+  const scheduleDateOptions = buildScheduleDateOptions(scheduledDeparture);
+  const scheduleTimeOptions = buildScheduleTimeOptions(scheduledDeparture);
+  const upcomingScheduledBookings = bookingHistory
+    .filter(isUpcomingScheduledBooking)
+    .sort((left, right) => {
+      const leftTime = getScheduledDepartureDate(left)?.getTime() || Number.MAX_SAFE_INTEGER;
+      const rightTime = getScheduledDepartureDate(right)?.getTime() || Number.MAX_SAFE_INTEGER;
+      return leftTime - rightTime;
+    })
+    .slice(0, 3);
 
   const resolveLocation = async (label, currentLocation, focusPoint) => {
     if (currentLocation?.label === label) {
@@ -131,6 +349,10 @@ export default function HomeScreen({ navigation }) {
         route,
         rideType: selectedType,
         allowMidTripPickup: selectedType !== 'solo',
+        departureTime:
+          selectedType === 'schedule'
+            ? scheduledDeparture.toISOString()
+            : addMinutes(new Date(), 15).toISOString(),
       });
       navigation.navigate('RideMatch');
     } catch (searchError) {
@@ -218,7 +440,11 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
 
-      <View style={styles.bottomSheet}>
+      <ScrollView
+        style={styles.bottomSheet}
+        contentContainerStyle={styles.bottomSheetContent}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.sheetHandle} />
         <Text style={styles.sheetTitle}>Match overlapping routes</Text>
         <Text style={styles.sheetSubtitle}>
@@ -319,6 +545,216 @@ export default function HomeScreen({ navigation }) {
           </Text>
         </View>
 
+        {selectedType === 'schedule' ? (
+          <View style={styles.scheduleCard}>
+            <Text style={styles.scheduleTitle}>Scheduled departure</Text>
+            <Text style={styles.scheduleValue}>{formatDeparture(scheduledDeparture)}</Text>
+            <Text style={styles.scheduleSubtitle}>
+              Save the trip now and we will keep it ready for that departure window.
+            </Text>
+
+            <View style={styles.schedulePresets}>
+              {schedulePresets.map((preset) => {
+                const isSelected =
+                  Math.abs(preset.value.getTime() - scheduledDeparture.getTime()) < 60000;
+
+                return (
+                  <TouchableOpacity
+                    key={preset.id}
+                    style={[
+                      styles.schedulePreset,
+                      isSelected && styles.schedulePresetActive,
+                    ]}
+                    onPress={() => setScheduledDeparture(new Date(preset.value))}
+                  >
+                    <Text
+                      style={[
+                        styles.schedulePresetText,
+                        isSelected && styles.schedulePresetTextActive,
+                      ]}
+                    >
+                      {preset.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.scheduleChooserTitle}>Choose a date</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.scheduleDateList}
+            >
+              {scheduleDateOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.id}
+                  style={[
+                    styles.scheduleDateChip,
+                    option.isSelected && styles.scheduleDateChipActive,
+                  ]}
+                  onPress={() =>
+                    setScheduledDeparture(
+                      withTime(option.value, scheduledDeparture.getHours(), scheduledDeparture.getMinutes())
+                    )
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.scheduleDateLabel,
+                      option.isSelected && styles.scheduleDateLabelActive,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.scheduleDateSublabel,
+                      option.isSelected && styles.scheduleDateSublabelActive,
+                    ]}
+                  >
+                    {option.sublabel}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <Text style={styles.scheduleChooserTitle}>Choose a time</Text>
+            <View style={styles.scheduleTimeList}>
+              {scheduleTimeOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.id}
+                  style={[
+                    styles.scheduleTimeChip,
+                    option.isSelected && styles.scheduleTimeChipActive,
+                  ]}
+                  onPress={() => setScheduledDeparture(new Date(option.value))}
+                >
+                  <Clock
+                    size={14}
+                    color={option.isSelected ? COLORS.textInverse : COLORS.accent}
+                  />
+                  <Text
+                    style={[
+                      styles.scheduleTimeLabel,
+                      option.isSelected && styles.scheduleTimeLabelActive,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {selectedType === 'schedule' ? (
+          <View style={styles.scheduledTripsSection}>
+            <View style={styles.scheduledTripsHeader}>
+              <View>
+                <Text style={styles.scheduledTripsTitle}>Already scheduled</Text>
+                <Text style={styles.scheduledTripsSubtitle}>
+                  Review the rides you have already lined up before booking another.
+                </Text>
+              </View>
+            </View>
+
+            {loading && bookingHistory.length === 0 ? (
+              <View style={styles.scheduledEmptyCard}>
+                <ActivityIndicator color={COLORS.primary} />
+                <Text style={styles.scheduledEmptyText}>Loading your scheduled rides...</Text>
+              </View>
+            ) : null}
+
+            {!loading && upcomingScheduledBookings.length === 0 ? (
+              <View style={styles.scheduledEmptyCard}>
+                <Text style={styles.scheduledEmptyTitle}>No scheduled rides yet</Text>
+                <Text style={styles.scheduledEmptyText}>
+                  Schedule a ride here and it will appear with all trip details.
+                </Text>
+              </View>
+            ) : null}
+
+            {upcomingScheduledBookings.map((booking) => {
+              const trip = booking.trip;
+              const departureDate = getScheduledDepartureDate(booking);
+              const isLiveBooking = activeBookingId === booking.bookingId;
+
+              return (
+                <TouchableOpacity
+                  key={booking.bookingId}
+                  style={styles.scheduledTripCard}
+                  onPress={() => navigation.navigate('BookingDetail', { booking })}
+                >
+                  <View style={styles.scheduledTripTop}>
+                    <View style={styles.scheduledStatusBadge}>
+                      <Calendar size={12} color={COLORS.accent} />
+                      <Text style={styles.scheduledStatusText}>
+                        {formatBookingStatus(trip?.status || booking.status)}
+                      </Text>
+                    </View>
+                    <Text style={styles.scheduledFare}>Rs {trip?.fareTotal || 0}</Text>
+                  </View>
+
+                  <Text style={styles.scheduledRouteTitle}>{trip?.routeLabel}</Text>
+
+                  <View style={styles.scheduledRouteRow}>
+                    <MapPin size={14} color={COLORS.success} />
+                    <Text numberOfLines={1} style={styles.scheduledRouteText}>
+                      {trip?.pickup}
+                    </Text>
+                  </View>
+                  <View style={styles.scheduledRouteRow}>
+                    <MapPin size={14} color={COLORS.error} />
+                    <Text numberOfLines={1} style={styles.scheduledRouteText}>
+                      {trip?.dropoff}
+                    </Text>
+                  </View>
+
+                  <View style={styles.scheduledMetaRow}>
+                    <View style={styles.scheduledMetaChip}>
+                      <Clock size={13} color={COLORS.primary} />
+                      <Text style={styles.scheduledMetaText}>
+                        {departureDate ? formatDeparture(departureDate) : 'Departure pending'}
+                      </Text>
+                    </View>
+                    <View style={styles.scheduledMetaChip}>
+                      <Car size={13} color={COLORS.primary} />
+                      <Text style={styles.scheduledMetaText}>
+                        {trip?.vehicle?.name || 'Vehicle assigned'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.scheduledBottomRow}>
+                    <View style={styles.scheduledDriverInfo}>
+                      <View style={styles.scheduledDriverAvatar}>
+                        <Text style={styles.scheduledDriverAvatarText}>
+                          {trip?.driver?.name?.charAt(0) || 'D'}
+                        </Text>
+                      </View>
+                      <View style={styles.scheduledDriverCopy}>
+                        <Text style={styles.scheduledDriverName}>
+                          {trip?.driver?.name || 'Driver assigned'}
+                        </Text>
+                        <Text style={styles.scheduledDriverMeta}>
+                          {trip?.distanceKm || 0} km | {trip?.durationMinutes || 0} min
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.scheduledActionChip}>
+                      <Text style={styles.scheduledActionText}>
+                        {isLiveBooking ? 'Open live trip' : 'View details'}
+                      </Text>
+                      <ChevronRight size={16} color={COLORS.textTertiary} />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
+
         <View style={styles.quickPlaces}>
           {USER_PROFILE.savedPlaces.map((place) => (
             <TouchableOpacity
@@ -370,7 +806,7 @@ export default function HomeScreen({ navigation }) {
           <Text style={styles.safetyText}>Live quotes, insured rides, and backend-ready trip orchestration</Text>
           <Zap size={14} color={COLORS.warning} />
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -513,11 +949,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
+    minHeight: height * 0.53,
+    ...SHADOWS.large,
+  },
+  bottomSheetContent: {
     paddingHorizontal: 20,
     paddingTop: 14,
     paddingBottom: 24,
-    minHeight: height * 0.53,
-    ...SHADOWS.large,
   },
   sheetHandle: {
     width: 44,
@@ -687,6 +1125,261 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     lineHeight: 20,
     ...FONTS.regular,
+  },
+  scheduleCard: {
+    backgroundColor: '#FFF8EF',
+    borderRadius: SIZES.radius_lg,
+    padding: 14,
+    marginTop: 16,
+  },
+  scheduleTitle: {
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
+  },
+  scheduleValue: {
+    color: COLORS.textPrimary,
+    fontSize: SIZES.xl,
+    marginTop: 6,
+    ...FONTS.bold,
+  },
+  scheduleSubtitle: {
+    color: COLORS.textSecondary,
+    marginTop: 6,
+    lineHeight: 20,
+    ...FONTS.regular,
+  },
+  schedulePresets: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 14,
+  },
+  scheduleChooserTitle: {
+    color: COLORS.textPrimary,
+    marginTop: 16,
+    ...FONTS.semiBold,
+  },
+  scheduleDateList: {
+    gap: 10,
+    paddingRight: 4,
+    marginTop: 12,
+  },
+  scheduleDateChip: {
+    minWidth: 86,
+    borderRadius: SIZES.radius_lg,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  scheduleDateChipActive: {
+    backgroundColor: COLORS.accent,
+  },
+  scheduleDateLabel: {
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
+  },
+  scheduleDateLabelActive: {
+    color: COLORS.textInverse,
+  },
+  scheduleDateSublabel: {
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    fontSize: SIZES.xs,
+    ...FONTS.medium,
+  },
+  scheduleDateSublabelActive: {
+    color: 'rgba(255,255,255,0.84)',
+  },
+  schedulePreset: {
+    borderRadius: SIZES.radius_full,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  schedulePresetActive: {
+    backgroundColor: COLORS.accent,
+  },
+  schedulePresetText: {
+    color: COLORS.textPrimary,
+    ...FONTS.medium,
+  },
+  schedulePresetTextActive: {
+    color: COLORS.textInverse,
+    ...FONTS.semiBold,
+  },
+  scheduleTimeList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 12,
+  },
+  scheduleTimeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: SIZES.radius_full,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  scheduleTimeChipActive: {
+    backgroundColor: COLORS.accent,
+  },
+  scheduleTimeLabel: {
+    color: COLORS.textPrimary,
+    ...FONTS.medium,
+  },
+  scheduleTimeLabelActive: {
+    color: COLORS.textInverse,
+    ...FONTS.semiBold,
+  },
+  scheduledTripsSection: {
+    marginTop: 16,
+    gap: 10,
+  },
+  scheduledTripsHeader: {
+    marginBottom: 2,
+  },
+  scheduledTripsTitle: {
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
+  },
+  scheduledTripsSubtitle: {
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    lineHeight: 20,
+    ...FONTS.regular,
+  },
+  scheduledEmptyCard: {
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radius_lg,
+    padding: 16,
+    alignItems: 'center',
+  },
+  scheduledEmptyTitle: {
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
+  },
+  scheduledEmptyText: {
+    color: COLORS.textSecondary,
+    marginTop: 8,
+    textAlign: 'center',
+    lineHeight: 20,
+    ...FONTS.regular,
+  },
+  scheduledTripCard: {
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radius_xl,
+    padding: 14,
+    ...SHADOWS.small,
+  },
+  scheduledTripTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  scheduledStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: SIZES.radius_full,
+    backgroundColor: `${COLORS.accent}14`,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  scheduledStatusText: {
+    color: COLORS.accent,
+    fontSize: SIZES.xs,
+    ...FONTS.semiBold,
+  },
+  scheduledFare: {
+    color: COLORS.textPrimary,
+    ...FONTS.bold,
+  },
+  scheduledRouteTitle: {
+    color: COLORS.textPrimary,
+    marginTop: 12,
+    ...FONTS.semiBold,
+  },
+  scheduledRouteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  scheduledRouteText: {
+    flex: 1,
+    color: COLORS.textSecondary,
+    ...FONTS.regular,
+  },
+  scheduledMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  scheduledMetaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: SIZES.radius_full,
+    backgroundColor: COLORS.surface,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  scheduledMetaText: {
+    color: COLORS.textPrimary,
+    fontSize: SIZES.sm,
+    ...FONTS.medium,
+  },
+  scheduledBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    gap: 10,
+  },
+  scheduledDriverInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 10,
+  },
+  scheduledDriverAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: `${COLORS.primary}15`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduledDriverAvatarText: {
+    color: COLORS.primary,
+    ...FONTS.bold,
+  },
+  scheduledDriverCopy: {
+    flex: 1,
+  },
+  scheduledDriverName: {
+    color: COLORS.textPrimary,
+    ...FONTS.medium,
+  },
+  scheduledDriverMeta: {
+    color: COLORS.textTertiary,
+    marginTop: 2,
+    fontSize: SIZES.xs,
+    ...FONTS.regular,
+  },
+  scheduledActionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  scheduledActionText: {
+    color: COLORS.textSecondary,
+    fontSize: SIZES.sm,
+    ...FONTS.semiBold,
   },
   quickPlaces: {
     marginTop: 16,

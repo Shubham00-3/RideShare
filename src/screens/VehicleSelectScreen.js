@@ -100,7 +100,11 @@ export default function VehicleSelectScreen({ navigation }) {
           </View>
         </ScrollView>
 
-        <ScrollView showsVerticalScrollIndicator={false} style={styles.vehicleList}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          style={styles.vehicleList}
+          contentContainerStyle={styles.vehicleListContent}
+        >
           {filteredVehicles.map((vehicle) => {
             const isSelected = selectedVehicle?.providerVehicleId === vehicle.providerVehicleId;
 
@@ -262,7 +266,8 @@ const styles = StyleSheet.create({
     ...FONTS.regular,
   },
   filtersScroll: {
-    marginBottom: 14,
+    marginBottom: 6,
+    flexGrow: 0,
   },
   filters: {
     flexDirection: 'row',
@@ -270,9 +275,13 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   filterChip: {
-    borderRadius: 999,
+    width: 82,
+    height: 82,
+    borderRadius: SIZES.radius_lg,
     backgroundColor: COLORS.background,
-    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
     paddingVertical: 10,
   },
   filterChipActive: {
@@ -280,6 +289,7 @@ const styles = StyleSheet.create({
   },
   filterChipText: {
     color: COLORS.textSecondary,
+    textAlign: 'center',
     ...FONTS.medium,
   },
   filterChipTextActive: {
@@ -288,6 +298,9 @@ const styles = StyleSheet.create({
   },
   vehicleList: {
     flex: 1,
+  },
+  vehicleListContent: {
+    paddingTop: 0,
   },
   vehicleCard: {
     flexDirection: 'row',

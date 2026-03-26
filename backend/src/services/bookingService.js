@@ -22,6 +22,7 @@ function buildLiveTripState({
   allowMidTripPickup,
   bookingCreatedAt,
   bookingStatus,
+  departureTime,
   distanceKm,
   durationMinutes,
   vehicleEtaMinutes,
@@ -31,8 +32,19 @@ function buildLiveTripState({
   const demoDriveMinutes = clamp(Math.round(durationMinutes * 0.35), 6, 18);
   const totalTimelineMinutes = arrivalMinutes + demoDriveMinutes;
   const createdAt = bookingCreatedAt ? new Date(bookingCreatedAt) : new Date();
+  const scheduledDeparture = departureTime ? new Date(departureTime) : null;
+  const timelineStart =
+    scheduledDeparture && scheduledDeparture.getTime() > createdAt.getTime()
+      ? scheduledDeparture
+      : createdAt;
   const now = new Date();
-  const rawElapsedMinutes = Math.max((now.getTime() - createdAt.getTime()) / 60000, 0);
+  const minutesUntilDeparture = scheduledDeparture
+    ? Math.max(Math.ceil((scheduledDeparture.getTime() - now.getTime()) / 60000), 0)
+    : 0;
+  const isScheduled =
+    minutesUntilDeparture > 0 &&
+    !['completed', 'cancelled', 'on_trip', 'arriving_soon'].includes(normalizedBookingStatus);
+  const rawElapsedMinutes = Math.max((now.getTime() - timelineStart.getTime()) / 60000, 0);
   const elapsedMinutes =
     normalizedBookingStatus === 'completed' ? totalTimelineMinutes : rawElapsedMinutes;
   const totalProgress = clamp(elapsedMinutes / totalTimelineMinutes, 0, 1);
@@ -49,9 +61,9 @@ function buildLiveTripState({
     rideProgress = Math.max(rideProgress, 0.82);
   }
 
-  let tripStatus = 'driver_arriving';
-  let phaseLabel = 'Driver arriving';
-  let nextStopLabel = 'Pickup point';
+  let tripStatus = isScheduled ? 'scheduled' : 'driver_arriving';
+  let phaseLabel = isScheduled ? 'Ride scheduled' : 'Driver arriving';
+  let nextStopLabel = isScheduled ? 'Scheduled pickup' : 'Pickup point';
 
   if (normalizedBookingStatus === 'cancelled') {
     tripStatus = 'cancelled';
@@ -84,7 +96,7 @@ function buildLiveTripState({
   }
 
   const remainingDistanceKm =
-    tripStatus === 'driver_arriving'
+    tripStatus === 'scheduled' || tripStatus === 'driver_arriving'
       ? distanceKm
       : tripStatus === 'completed'
         ? 0
@@ -101,16 +113,16 @@ function buildLiveTripState({
   return {
     driverEtaMinutes: tripStatus === 'driver_arriving' ? remainingMinutes : 0,
     estimatedCompletionAt: new Date(
-      createdAt.getTime() + totalTimelineMinutes * 60 * 1000
+      timelineStart.getTime() + totalTimelineMinutes * 60 * 1000
     ).toISOString(),
     lastUpdatedAt: now.toISOString(),
     liveTimelineMinutes: totalTimelineMinutes,
     midTripOffer,
     nextStopLabel,
     phaseLabel,
-    progress: Number(totalProgress.toFixed(2)),
+    progress: Number((tripStatus === 'scheduled' ? 0 : totalProgress).toFixed(2)),
     remainingDistanceKm,
-    remainingMinutes,
+    remainingMinutes: tripStatus === 'scheduled' ? minutesUntilDeparture : remainingMinutes,
     status: tripStatus,
   };
 }
@@ -135,6 +147,7 @@ function normalizeBookingRow(row) {
     allowMidTripPickup,
     bookingCreatedAt: row.booking_created_at || row.created_at,
     bookingStatus: row.booking_status,
+    departureTime: row.departure_time,
     distanceKm,
     durationMinutes,
     vehicleEtaMinutes: row.vehicle_eta_minutes,
@@ -182,6 +195,7 @@ function normalizeBookingRow(row) {
           : null,
       routeLabel: `${pickupLabel.split(',')[0]} -> ${dropoffLabel.split(',')[0]}`,
       rideType: row.ride_type || 'shared',
+      departureTime: row.departure_time || null,
       allowMidTripPickup,
       etaMinutes: liveTripState.remainingMinutes,
       driverEtaMinutes: liveTripState.driverEtaMinutes,
@@ -262,6 +276,7 @@ async function getBookingById(bookingId) {
         rr.dropoff_lng,
         rr.ride_type,
         rr.allow_mid_trip_pickup,
+        rr.departure_time,
         rr.origin_km,
         rr.destination_km,
         rr.route_distance_meters,
@@ -317,6 +332,7 @@ async function getBookingsForUser(userId) {
         rr.dropoff_lng,
         rr.ride_type,
         rr.allow_mid_trip_pickup,
+        rr.departure_time,
         rr.origin_km,
         rr.destination_km,
         rr.route_distance_meters,
@@ -384,6 +400,7 @@ async function getDriverBookings(userId) {
         rr.dropoff_lng,
         rr.ride_type,
         rr.allow_mid_trip_pickup,
+        rr.departure_time,
         rr.origin_km,
         rr.destination_km,
         rr.route_distance_meters,
@@ -543,6 +560,105 @@ async function updateDriverBookingStatus({ bookingId, status, userId }) {
           where id = $1
         `,
         [bookingRow.active_trip_id, tripStatus]
+      );
+    }
+
+    await client.query('commit');
+    return getBookingById(bookingId);
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function cancelBookingForUser({ bookingId, userId }) {
+  const pool = db.getPool();
+
+  if (!pool) {
+    throw new Error('Database is required for rider cancellation.');
+  }
+
+  if (!userId) {
+    throw new Error('Authentication is required.');
+  }
+
+  const client = await pool.connect();
+
+  const buildStatusError = (message, statusCode) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+  };
+
+  try {
+    await client.query('begin');
+
+    const bookingResult = await client.query(
+      `
+        select
+          b.id as booking_id,
+          b.booking_status,
+          b.active_trip_id,
+          b.ride_request_id,
+          rr.rider_id
+        from bookings b
+        join ride_requests rr on rr.id = b.ride_request_id
+        where b.id = $1
+        limit 1
+      `,
+      [bookingId]
+    );
+
+    const bookingRow = bookingResult.rows[0];
+
+    if (!bookingRow) {
+      throw buildStatusError('Booking not found.', 404);
+    }
+
+    if (bookingRow.rider_id !== userId) {
+      throw buildStatusError('You can only cancel your own bookings.', 403);
+    }
+
+    if (['completed', 'cancelled'].includes(String(bookingRow.booking_status || '').toLowerCase())) {
+      await client.query('commit');
+      return getBookingById(bookingId);
+    }
+
+    await client.query(
+      `
+        update bookings
+        set booking_status = 'cancelled'
+        where id = $1
+      `,
+      [bookingId]
+    );
+
+    if (bookingRow.ride_request_id) {
+      await client.query(
+        `
+          update ride_requests
+          set status = 'cancelled'
+          where id = $1
+        `,
+        [bookingRow.ride_request_id]
+      );
+    }
+
+    if (bookingRow.active_trip_id) {
+      await client.query(
+        `
+          update active_trips
+          set
+            available_seats = available_seats + 1,
+            status = case
+              when status in ('completed', 'cancelled') then status
+              else 'open'
+            end
+          where id = $1
+        `,
+        [bookingRow.active_trip_id]
       );
     }
 
@@ -749,6 +865,7 @@ async function confirmBooking({ request, match, vehicle, quote, options = {} }) 
 }
 
 module.exports = {
+  cancelBookingForUser,
   calculateQuote,
   confirmBooking,
   getDriverBookings,

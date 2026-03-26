@@ -19,6 +19,7 @@ const {
 } = require('./services/mappingService');
 const { previewMatches } = require('./services/matchingService');
 const {
+  cancelBookingForUser,
   calculateQuote,
   confirmBooking,
   getBookingById,
@@ -162,6 +163,18 @@ app.get('/api/me/bookings', requireAuth, async (req, res, next) => {
   }
 });
 
+app.patch('/api/bookings/:id/cancel', requireAuth, async (req, res, next) => {
+  try {
+    const booking = await cancelBookingForUser({
+      bookingId: req.params.id,
+      userId: req.auth.user.id,
+    });
+    res.json(booking);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/driver/me/trips', requireAuth, async (req, res, next) => {
   try {
     if (req.auth.user.role !== 'driver') {
@@ -237,16 +250,24 @@ app.use((error, _req, res, _next) => {
   console.error(error);
   const message = error.message || 'Unexpected server error';
   const lowerMessage = message.toLowerCase();
-  const statusCode =
+  const inferredStatusCode =
     lowerMessage.includes('otp') ||
     lowerMessage.includes('phone') ||
     lowerMessage.includes('session') ||
     lowerMessage.includes('authentication')
       ? 400
       : 500;
+  const statusCode = Number(error.statusCode || inferredStatusCode);
 
   res.status(statusCode).json({
-    error: statusCode === 400 ? 'bad_request' : 'internal_server_error',
+    error:
+      statusCode === 400
+        ? 'bad_request'
+        : statusCode === 403
+          ? 'forbidden'
+          : statusCode === 404
+            ? 'not_found'
+            : 'internal_server_error',
     message,
   });
 });

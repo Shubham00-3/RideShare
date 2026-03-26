@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   Animated,
   Dimensions,
   StyleSheet,
@@ -32,6 +33,8 @@ export default function ActiveTripScreen({ navigation }) {
     activeBookingId,
     activeBookingSource,
     activeTrip,
+    cancelBooking,
+    loading,
     refreshActiveBooking,
   } = useRide();
   const [showMidTripAlert, setShowMidTripAlert] = useState(false);
@@ -116,6 +119,7 @@ export default function ActiveTripScreen({ navigation }) {
     isBackendBackedTrip && typeof activeTrip.progress === 'number'
       ? activeTrip.progress
       : localTripProgress;
+  const isScheduledRide = String(activeTrip.status || '') === 'scheduled';
   const kmLeft =
     typeof activeTrip.remainingDistanceKm === 'number'
       ? Math.max(Math.round(activeTrip.remainingDistanceKm), 0)
@@ -130,6 +134,10 @@ export default function ActiveTripScreen({ navigation }) {
   const liveUpdateText = isBackendBackedTrip
     ? `Live updates every ${LIVE_REFRESH_MS / 1000}s`
     : 'Demo trip simulation';
+  const progressText = isScheduledRide
+    ? `${etaLeft} min until pickup window`
+    : `${Math.round(tripProgress * 100)}% complete`;
+  const canCancelRide = !['completed', 'cancelled'].includes(String(activeTrip.status || '').toLowerCase());
 
   return (
     <View style={styles.container}>
@@ -198,7 +206,7 @@ export default function ActiveTripScreen({ navigation }) {
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${tripProgress * 100}%` }]} />
           </View>
-          <Text style={styles.progressText}>{Math.round(tripProgress * 100)}% complete</Text>
+          <Text style={styles.progressText}>{progressText}</Text>
         </View>
 
         <View style={styles.tripHeader}>
@@ -252,6 +260,41 @@ export default function ActiveTripScreen({ navigation }) {
           <Text style={styles.earningsLine}>Fare paid: Rs. {activeTrip.fareTotal}</Text>
           <Text style={styles.earningsLine}>Savings unlocked: Rs. {activeTrip.fareSavings}</Text>
         </View>
+
+        {canCancelRide ? (
+          <TouchableOpacity
+            style={styles.cancelButton}
+            disabled={loading}
+            onPress={() => {
+              Alert.alert(
+                'Cancel this ride?',
+                'This will cancel the trip for you and update the booking status immediately.',
+                [
+                  { text: 'Keep ride', style: 'cancel' },
+                  {
+                    text: 'Cancel ride',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        await cancelBooking(activeBookingId);
+                        navigation.navigate('MainTabs');
+                      } catch (cancelError) {
+                        Alert.alert(
+                          'Cancellation unavailable',
+                          cancelError.message || 'We could not cancel the ride right now.'
+                        );
+                      }
+                    },
+                  },
+                ]
+              );
+            }}
+          >
+            <Text style={styles.cancelButtonText}>
+              {loading ? 'Cancelling...' : 'Cancel ride'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
 
         <View style={styles.actionRow}>
           <TouchableOpacity style={styles.actionBtn}>
@@ -568,6 +611,20 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 2,
     ...FONTS.medium,
+  },
+  cancelButton: {
+    marginTop: 14,
+    borderRadius: SIZES.radius_lg,
+    borderWidth: 1,
+    borderColor: COLORS.error,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surface,
+  },
+  cancelButtonText: {
+    color: COLORS.error,
+    ...FONTS.semiBold,
   },
   actionRow: {
     flexDirection: 'row',

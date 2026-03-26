@@ -1,12 +1,13 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, Text, View } from 'react-native';
-import { Home, Clock, User, Car } from 'lucide-react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Home, Clock, User, Car, ChevronRight, Navigation } from 'lucide-react-native';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
+import { useRide } from '../context/RideContext';
 
 // Screens
 import OnboardingScreen from '../screens/OnboardingScreen';
@@ -16,6 +17,7 @@ import RideMatchScreen from '../screens/RideMatchScreen';
 import VehicleSelectScreen from '../screens/VehicleSelectScreen';
 import CheckoutScreen from '../screens/CheckoutScreen';
 import ActiveTripScreen from '../screens/ActiveTripScreen';
+import BookingDetailScreen from '../screens/BookingDetailScreen';
 import TripHistoryScreen from '../screens/TripHistoryScreen';
 import DriverDashboardScreen from '../screens/DriverDashboardScreen';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -24,9 +26,64 @@ import SOSScreen from '../screens/SOSScreen';
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
+function ActiveRideTabBar(props) {
+  const { activeTrip } = useRide();
+  const hasActiveRide = Boolean(
+    activeTrip && !['completed', 'cancelled'].includes(String(activeTrip.status || ''))
+  );
+  const isScheduledRide = String(activeTrip?.status || '') === 'scheduled';
+  const etaLabel =
+    typeof activeTrip?.etaMinutes === 'number'
+      ? isScheduledRide
+        ? `Starts in ${activeTrip.etaMinutes} min`
+        : `${activeTrip.etaMinutes} min away`
+      : isScheduledRide
+        ? 'Scheduled ride'
+        : 'Live trip';
+  const routeLabel = activeTrip?.dropoff
+    ? `Ride to ${activeTrip.dropoff.split(',')[0]}`
+    : activeTrip?.pickup
+      ? `Ride from ${activeTrip.pickup.split(',')[0]}`
+      : 'Track your active ride';
+
+  return (
+    <View style={styles.tabBarShell}>
+      {hasActiveRide ? (
+        <TouchableOpacity
+          activeOpacity={0.92}
+          style={styles.activeRideBanner}
+          onPress={() => props.navigation.getParent()?.navigate('ActiveTrip')}
+        >
+          <View style={styles.activeRideIcon}>
+            <Navigation size={16} color={COLORS.textInverse} />
+          </View>
+          <View style={styles.activeRideContent}>
+            <Text style={styles.activeRideTitle}>
+              {isScheduledRide ? 'Scheduled ride ready' : 'Active ride in progress'}
+            </Text>
+            <Text numberOfLines={1} style={styles.activeRideSubtitle}>
+              {routeLabel} | {etaLabel}
+            </Text>
+          </View>
+          <ChevronRight size={18} color={COLORS.textInverse} />
+        </TouchableOpacity>
+      ) : null}
+      <BottomTabBar {...props} />
+    </View>
+  );
+}
+
 function MainTabs() {
+  const { activeTrip } = useRide();
+  const { user } = useAuth();
+  const hasActiveRide = Boolean(
+    activeTrip && !['completed', 'cancelled'].includes(String(activeTrip.status || ''))
+  );
+  const isDriver = user?.role === 'driver';
+
   return (
     <Tab.Navigator
+      tabBar={(props) => <ActiveRideTabBar {...props} />}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: COLORS.primary,
@@ -39,7 +96,7 @@ function MainTabs() {
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.1,
           shadowRadius: 12,
-          height: 85,
+          height: hasActiveRide ? 92 : 85,
           paddingTop: 8,
           paddingBottom: 28,
         },
@@ -64,13 +121,15 @@ function MainTabs() {
           tabBarIcon: ({ color, size }) => <Clock size={size} color={color} />,
         }}
       />
-      <Tab.Screen
-        name="Drive"
-        component={DriverDashboardScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => <Car size={size} color={color} />,
-        }}
-      />
+      {isDriver ? (
+        <Tab.Screen
+          name="Drive"
+          component={DriverDashboardScreen}
+          options={{
+            tabBarIcon: ({ color, size }) => <Car size={size} color={color} />,
+          }}
+        />
+      ) : null}
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
@@ -111,6 +170,7 @@ export default function AppNavigator() {
             <Stack.Screen name="VehicleSelect" component={VehicleSelectScreen} />
             <Stack.Screen name="Checkout" component={CheckoutScreen} />
             <Stack.Screen name="ActiveTrip" component={ActiveTripScreen} />
+            <Stack.Screen name="BookingDetail" component={BookingDetailScreen} />
             <Stack.Screen name="SOS" component={SOSScreen} />
           </>
         ) : (
@@ -124,7 +184,7 @@ export default function AppNavigator() {
   );
 }
 
-const styles = {
+const styles = StyleSheet.create({
   loadingScreen: {
     flex: 1,
     backgroundColor: COLORS.background,
@@ -137,4 +197,40 @@ const styles = {
     fontSize: SIZES.md,
     ...FONTS.medium,
   },
-};
+  tabBarShell: {
+    backgroundColor: COLORS.surface,
+  },
+  activeRideBanner: {
+    marginHorizontal: 14,
+    marginTop: 10,
+    marginBottom: 2,
+    borderRadius: SIZES.radius_xl,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  activeRideIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activeRideContent: {
+    flex: 1,
+  },
+  activeRideTitle: {
+    color: COLORS.textInverse,
+    ...FONTS.semiBold,
+  },
+  activeRideSubtitle: {
+    color: 'rgba(255,255,255,0.82)',
+    marginTop: 3,
+    fontSize: SIZES.sm,
+    ...FONTS.medium,
+  },
+});

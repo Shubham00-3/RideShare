@@ -254,6 +254,17 @@ export async function fetchMyBookings(authToken) {
   });
 }
 
+export async function cancelRideBooking(bookingId, authToken) {
+  if (!API_BASE_URL) {
+    throw new Error('API base URL is not configured.');
+  }
+
+  return requestJson(`/api/bookings/${bookingId}/cancel`, {
+    authToken,
+    method: 'PATCH',
+  });
+}
+
 export async function fetchDriverTrips(authToken) {
   if (!API_BASE_URL) {
     return {

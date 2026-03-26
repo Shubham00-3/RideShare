@@ -20,7 +20,7 @@ import {
 import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
 import { useRide } from '../context/RideContext';
 
-export default function TripHistoryScreen() {
+export default function TripHistoryScreen({ navigation }) {
   const { bookingHistory, error, loading, refreshBookingHistory } = useRide();
 
   useEffect(() => {
@@ -95,7 +95,11 @@ export default function TripHistoryScreen() {
           const tripType = trip?.rideType === 'solo' ? 'Solo' : 'Shared';
 
           return (
-            <TouchableOpacity key={booking.bookingId} style={styles.tripCard}>
+            <TouchableOpacity
+              key={booking.bookingId}
+              style={styles.tripCard}
+              onPress={() => navigation.navigate('BookingDetail', { booking })}
+            >
               <View style={styles.tripTop}>
                 <View style={styles.tripRoute}>
                   <View style={styles.routeDots}>
@@ -202,7 +206,8 @@ const styles = StyleSheet.create({
   },
   summaryScroll: {
     backgroundColor: COLORS.surface,
-    paddingBottom: 16,
+    paddingBottom: 8,
+    flexGrow: 0,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -211,13 +216,14 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     width: 130,
-    paddingVertical: 16,
-    paddingHorizontal: 14,
+    height: 130,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: SIZES.radius_xl,
-    gap: 6,
+    gap: 4,
   },
   summaryValue: {
-    fontSize: SIZES.xxl,
+    fontSize: SIZES.xl,
     color: COLORS.textInverse,
     ...FONTS.bold,
   },
@@ -229,7 +235,7 @@ const styles = StyleSheet.create({
   tripList: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 8,
   },
   dateHeader: {
     flexDirection: 'row',

@@ -208,6 +208,10 @@ export function buildMockBooking({ request, match, vehicle, quote, options }) {
   const now = Date.now();
   const driverName = vehicle.driver?.name || match.passenger?.name || 'Assigned driver';
   const etaMinutes = Number(String(vehicle.eta || match.eta || '4').replace(/[^\d.]/g, '')) || 4;
+  const departureTime =
+    request.departureTime || new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const isScheduledRide =
+    request.rideType === 'schedule' && new Date(departureTime).getTime() > now;
 
   return {
     bookingId: `booking_${now}`,
@@ -215,14 +219,17 @@ export function buildMockBooking({ request, match, vehicle, quote, options }) {
     source: 'mock',
     trip: {
       id: `trip_${now}`,
-      status: 'driver_arriving',
+      status: isScheduledRide ? 'scheduled' : 'driver_arriving',
       pickup: request.pickup,
       dropoff: request.dropoff,
       pickupLocation: request.pickupLocation || null,
       dropoffLocation: request.dropoffLocation || null,
       rideType: request.rideType,
+      departureTime,
       allowMidTripPickup: options?.allowMidTripPickup ?? true,
-      etaMinutes,
+      etaMinutes: isScheduledRide
+        ? Math.max(Math.ceil((new Date(departureTime).getTime() - now) / 60000), 0)
+        : etaMinutes,
       durationMinutes: request.durationMinutes,
       distanceKm: request.distanceKm,
       routeGeometry: request.route?.geometry || null,
@@ -233,6 +240,9 @@ export function buildMockBooking({ request, match, vehicle, quote, options }) {
       fareTotal: quote.totals.total,
       fareSavings: quote.totals.estimatedSavings,
       routeLabel: `${request.pickup.split(',')[0]} -> ${request.dropoff.split(',')[0]}`,
+      phaseLabel: isScheduledRide ? 'Ride scheduled' : 'Driver arriving',
+      nextStopLabel: isScheduledRide ? 'Scheduled pickup' : 'Pickup point',
+      progress: 0,
       vehicle: {
         name: vehicle.name,
         type: vehicle.type,
@@ -249,7 +259,7 @@ export function buildMockBooking({ request, match, vehicle, quote, options }) {
         name: USER_PROFILE.name,
         phone: USER_PROFILE.phone,
       },
-      midTripOffer: options?.allowMidTripPickup
+      midTripOffer: !isScheduledRide && options?.allowMidTripPickup
         ? {
             title: 'New rider joining in 3 min!',
             discount: 40,

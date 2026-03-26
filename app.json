@@ -28,7 +28,14 @@
     },
     "plugins": [
       "expo-router",
-      "@maplibre/maplibre-react-native"
+      "@maplibre/maplibre-react-native",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Allow RideShare Connect to add your scheduled rides to the calendar.",
+          "remindersPermission": "Allow RideShare Connect to create ride reminders."
+        }
+      ]
     ]
   }
 }

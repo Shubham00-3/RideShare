@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useAuth } from './AuthContext';
 import {
+  cancelRideBooking,
   confirmRideBooking,
   fetchBookingDetails,
   fetchBookingQuote,
@@ -22,6 +23,24 @@ const DEFAULT_SEARCH = {
   allowMidTripPickup: true,
   departureTime: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
 };
+
+function buildCancelledTrip(trip) {
+  if (!trip) {
+    return null;
+  }
+
+  return {
+    ...trip,
+    status: 'cancelled',
+    phaseLabel: 'Trip cancelled',
+    nextStopLabel: 'Cancelled',
+    etaMinutes: 0,
+    driverEtaMinutes: 0,
+    progress: 0,
+    remainingDistanceKm: 0,
+    midTripOffer: null,
+  };
+}
 
 export function RideProvider({ children }) {
   const { signOut, token } = useAuth();
@@ -217,12 +236,71 @@ export function RideProvider({ children }) {
     }
   }, [signOut, token]);
 
+  const cancelBooking = useCallback(async (bookingIdOverride) => {
+    const bookingId = bookingIdOverride || activeBookingId;
+
+    if (!bookingId) {
+      throw new Error('No booking is available to cancel.');
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      let cancelledBooking;
+
+      if (token && hasApiBaseUrl) {
+        cancelledBooking = await cancelRideBooking(bookingId, token);
+      } else if (bookingId === activeBookingId && activeTrip) {
+        cancelledBooking = {
+          bookingId,
+          source: activeBookingSource || 'local',
+          status: 'cancelled',
+          trip: buildCancelledTrip(activeTrip),
+        };
+      } else {
+        throw new Error('Cancellation requires the API to be available for this booking.');
+      }
+
+      setBookingHistory((previous) => {
+        const hasExistingBooking = previous.some((item) => item.bookingId === cancelledBooking.bookingId);
+        const nextItems = hasExistingBooking
+          ? previous.map((item) =>
+              item.bookingId === cancelledBooking.bookingId
+                ? { ...item, ...cancelledBooking, trip: cancelledBooking.trip || item.trip }
+                : item
+            )
+          : [cancelledBooking, ...previous];
+
+        return nextItems;
+      });
+
+      if (bookingId === activeBookingId) {
+        setActiveTrip(cancelledBooking.trip || buildCancelledTrip(activeTrip));
+        setActiveBookingSource(cancelledBooking.source || activeBookingSource || 'api');
+      }
+
+      return cancelledBooking;
+    } catch (cancelError) {
+      if (cancelError.statusCode === 401) {
+        await signOut();
+      }
+
+      const message = cancelError.message || 'Unable to cancel the ride right now.';
+      setError(message);
+      throw cancelError;
+    } finally {
+      setLoading(false);
+    }
+  }, [activeBookingId, activeBookingSource, activeTrip, signOut, token]);
+
   const value = useMemo(
     () => ({
       activeBookingId,
       activeBookingSource,
       activeTrip,
       bookingHistory,
+      cancelBooking,
       chooseMatch,
       chooseVehicle,
       createBooking,
@@ -259,6 +337,7 @@ export function RideProvider({ children }) {
       searchRides,
       refreshQuote,
       createBooking,
+      cancelBooking,
       chooseMatch,
       chooseVehicle,
     ]

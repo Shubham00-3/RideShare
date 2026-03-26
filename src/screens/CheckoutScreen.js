@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   ScrollView,
   StyleSheet,
   Switch,
@@ -10,6 +11,7 @@ import {
 } from 'react-native';
 import {
   ArrowLeft,
+  Calendar,
   Car,
   Check,
   Clock,
@@ -22,6 +24,7 @@ import {
 import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
 import { USER_PROFILE } from '../constants/data';
 import { useRide } from '../context/RideContext';
+import { addScheduledRideToCalendar } from '../services/calendarService';
 
 export default function CheckoutScreen({ navigation }) {
   const {
@@ -37,6 +40,8 @@ export default function CheckoutScreen({ navigation }) {
   const [insurance, setInsurance] = useState(true);
   const [midTripPickup, setMidTripPickup] = useState(true);
   const [selectedPayment, setSelectedPayment] = useState('upi');
+  const [syncCalendar, setSyncCalendar] = useState(true);
+  const isScheduledRide = rideRequest?.rideType === 'schedule';
 
   useEffect(() => {
     refreshQuote({
@@ -110,6 +115,23 @@ export default function CheckoutScreen({ navigation }) {
             <Text style={styles.vehicleETA}>{selectedVehicle?.eta}</Text>
           </View>
         </View>
+
+        {isScheduledRide ? (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Scheduled departure</Text>
+            <View style={styles.scheduleInfoRow}>
+              <Clock size={18} color={COLORS.accent} />
+              <View style={styles.scheduleInfoCopy}>
+                <Text style={styles.scheduleInfoValue}>
+                  {new Date(rideRequest.departureTime).toLocaleString()}
+                </Text>
+                <Text style={styles.scheduleInfoLabel}>
+                  We will keep this booking aligned to your selected departure window.
+                </Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Fare Breakdown</Text>
@@ -198,6 +220,26 @@ export default function CheckoutScreen({ navigation }) {
               thumbColor={midTripPickup ? COLORS.success : COLORS.textTertiary}
             />
           </View>
+
+          {isScheduledRide ? (
+            <View style={[styles.toggleRow, styles.toggleDivider]}>
+              <View style={styles.toggleInfo}>
+                <Calendar size={18} color={COLORS.accent} />
+                <View>
+                  <Text style={styles.toggleLabel}>Add to my calendar</Text>
+                  <Text style={styles.toggleDesc}>
+                    Save this scheduled ride as a calendar event after booking
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={syncCalendar}
+                onValueChange={setSyncCalendar}
+                trackColor={{ true: `${COLORS.accent}40`, false: COLORS.border }}
+                thumbColor={syncCalendar ? COLORS.accent : COLORS.textTertiary}
+              />
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.sectionCard}>
@@ -241,12 +283,31 @@ export default function CheckoutScreen({ navigation }) {
           style={styles.payButton}
           disabled={loading || !quote}
           onPress={async () => {
-            await createBooking({
-              insurance,
-              allowMidTripPickup: midTripPickup,
-              paymentMethod: selectedPayment,
-            });
-            navigation.navigate('ActiveTrip');
+            try {
+              const booking = await createBooking({
+                insurance,
+                allowMidTripPickup: midTripPickup,
+                paymentMethod: selectedPayment,
+              });
+
+              if (isScheduledRide && syncCalendar) {
+                try {
+                  await addScheduledRideToCalendar(booking);
+                } catch (calendarError) {
+                  Alert.alert(
+                    'Calendar sync unavailable',
+                    calendarError.message || 'We could not add this ride to your calendar.'
+                  );
+                }
+              }
+
+              navigation.navigate('ActiveTrip');
+            } catch (bookingError) {
+              Alert.alert(
+                'Booking unavailable',
+                bookingError.message || 'We could not confirm the ride right now.'
+              );
+            }
           }}
         >
           {loading ? (
@@ -392,6 +453,24 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginBottom: 14,
     ...FONTS.semiBold,
+  },
+  scheduleInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  scheduleInfoCopy: {
+    flex: 1,
+  },
+  scheduleInfoValue: {
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
+  },
+  scheduleInfoLabel: {
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    lineHeight: 20,
+    ...FONTS.regular,
   },
   fareRow: {
     flexDirection: 'row',
