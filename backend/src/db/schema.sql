@@ -84,6 +84,14 @@ create table if not exists active_trips (
   available_seats integer not null,
   allow_mid_trip_join boolean not null default true,
   base_solo_fare numeric(10,2) not null,
+  route_geometry jsonb,
+  route_distance_meters integer,
+  route_duration_seconds integer,
+  current_lat numeric(10,6),
+  current_lng numeric(10,6),
+  last_location_at timestamptz,
+  started_at timestamptz,
+  completed_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -120,6 +128,16 @@ create table if not exists user_sessions (
 
 alter table drivers
   add column if not exists is_online boolean not null default true;
+
+alter table active_trips
+  add column if not exists route_geometry jsonb,
+  add column if not exists route_distance_meters integer,
+  add column if not exists route_duration_seconds integer,
+  add column if not exists current_lat numeric(10,6),
+  add column if not exists current_lng numeric(10,6),
+  add column if not exists last_location_at timestamptz,
+  add column if not exists started_at timestamptz,
+  add column if not exists completed_at timestamptz;
 
 alter table ride_requests
   add column if not exists pickup_lat numeric(10,6),

@@ -1,6 +1,14 @@
 const crypto = require('crypto');
 const db = require('../config/db');
 const env = require('../config/env');
+const { checkVerification, startVerification } = require('./twilioVerifyService');
+
+const REQUEST_WINDOW_MS = 10 * 60 * 1000;
+const VERIFY_WINDOW_MS = 10 * 60 * 1000;
+const REQUEST_LIMIT = 3;
+const VERIFY_LIMIT = 5;
+const requestRateLimitStore = new Map();
+const verifyRateLimitStore = new Map();
 
 function hashValue(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
@@ -53,6 +61,30 @@ function buildSessionPayload({ token, expiresAt, user, devOtp }) {
   };
 }
 
+function enforceRateLimit(store, key, limit, windowMs, message) {
+  const now = Date.now();
+  const current = store.get(key);
+
+  if (!current || current.expiresAt <= now) {
+    store.set(key, {
+      count: 1,
+      expiresAt: now + windowMs,
+    });
+    return;
+  }
+
+  if (current.count >= limit) {
+    throw new Error(message);
+  }
+
+  current.count += 1;
+  store.set(key, current);
+}
+
+function resetRateLimit(store, key) {
+  store.delete(key);
+}
+
 async function ensureRiderUser(client, phone) {
   const existingUser = await client.query(
     `
@@ -91,6 +123,28 @@ async function ensureRiderUser(client, phone) {
   return createdUser.rows[0];
 }
 
+async function createSessionForUser(client, userId) {
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + env.authSessionDays * 24 * 60 * 60 * 1000);
+
+  await client.query(
+    `
+      insert into user_sessions (
+        user_id,
+        token_hash,
+        expires_at
+      )
+      values ($1, $2, $3)
+    `,
+    [userId, hashValue(token), expiresAt.toISOString()]
+  );
+
+  return {
+    token,
+    expiresAt: expiresAt.toISOString(),
+  };
+}
+
 async function requestOtp(phone) {
   const pool = db.getPool();
 
@@ -99,46 +153,68 @@ async function requestOtp(phone) {
   }
 
   const normalizedPhone = normalizePhone(phone);
+  enforceRateLimit(
+    requestRateLimitStore,
+    normalizedPhone,
+    REQUEST_LIMIT,
+    REQUEST_WINDOW_MS,
+    'Too many OTP requests. Please wait a few minutes before trying again.'
+  );
+
   const client = await pool.connect();
 
   try {
     await client.query('begin');
 
     const user = await ensureRiderUser(client, normalizedPhone);
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = new Date(Date.now() + env.authOtpTtlMinutes * 60 * 1000);
 
-    await client.query(
-      `
-        update auth_otps
-        set consumed_at = now()
-        where phone = $1
-          and consumed_at is null
-      `,
-      [normalizedPhone]
-    );
+    if (env.authExposeDevOtp) {
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const expiresAt = new Date(Date.now() + env.authOtpTtlMinutes * 60 * 1000);
 
-    await client.query(
-      `
-        insert into auth_otps (
-          user_id,
-          phone,
-          code_hash,
-          expires_at
-        )
-        values ($1, $2, $3, $4)
-      `,
-      [user.id, normalizedPhone, hashValue(code), expiresAt.toISOString()]
-    );
+      await client.query(
+        `
+          update auth_otps
+          set consumed_at = now()
+          where phone = $1
+            and consumed_at is null
+        `,
+        [normalizedPhone]
+      );
 
+      await client.query(
+        `
+          insert into auth_otps (
+            user_id,
+            phone,
+            code_hash,
+            expires_at
+          )
+          values ($1, $2, $3, $4)
+        `,
+        [user.id, normalizedPhone, hashValue(code), expiresAt.toISOString()]
+      );
+
+      await client.query('commit');
+
+      return {
+        ok: true,
+        phone: normalizedPhone,
+        maskedPhone: maskPhone(normalizedPhone),
+        expiresAt: expiresAt.toISOString(),
+        devOtp: code,
+        user: publicUser(user),
+      };
+    }
+
+    await startVerification(normalizedPhone);
     await client.query('commit');
 
     return {
       ok: true,
       phone: normalizedPhone,
       maskedPhone: maskPhone(normalizedPhone),
-      expiresAt: expiresAt.toISOString(),
-      devOtp: env.authExposeDevOtp ? code : undefined,
+      expiresAt: new Date(Date.now() + env.authOtpTtlMinutes * 60 * 1000).toISOString(),
       user: publicUser(user),
     };
   } catch (error) {
@@ -157,83 +233,81 @@ async function verifyOtp(phone, code) {
   }
 
   const normalizedPhone = normalizePhone(phone);
+  enforceRateLimit(
+    verifyRateLimitStore,
+    normalizedPhone,
+    VERIFY_LIMIT,
+    VERIFY_WINDOW_MS,
+    'Too many OTP verification attempts. Please request a new code and try again.'
+  );
+
   const client = await pool.connect();
 
   try {
     await client.query('begin');
 
-    const otpResult = await client.query(
-      `
-        select
-          o.id,
-          o.user_id,
-          o.phone,
-          o.code_hash,
-          o.expires_at,
-          u.id as user_id_value,
-          u.full_name,
-          u.phone as user_phone,
-          u.email,
-          u.role,
-          u.rating
-        from auth_otps o
-        join users u on u.id = o.user_id
-        where o.phone = $1
-          and o.consumed_at is null
-          and o.expires_at > now()
-        order by o.created_at desc
-        limit 1
-      `,
-      [normalizedPhone]
-    );
+    const user = await ensureRiderUser(client, normalizedPhone);
 
-    const otpRow = otpResult.rows[0];
+    if (env.authExposeDevOtp) {
+      const otpResult = await client.query(
+        `
+          select
+            o.id,
+            o.user_id,
+            o.phone,
+            o.code_hash,
+            o.expires_at,
+            u.id as user_id_value,
+            u.full_name,
+            u.phone as user_phone,
+            u.email,
+            u.role,
+            u.rating
+          from auth_otps o
+          join users u on u.id = o.user_id
+          where o.phone = $1
+            and o.consumed_at is null
+            and o.expires_at > now()
+          order by o.created_at desc
+          limit 1
+        `,
+        [normalizedPhone]
+      );
 
-    if (!otpRow) {
-      throw new Error('OTP expired or not found. Please request a new code.');
+      const otpRow = otpResult.rows[0];
+
+      if (!otpRow) {
+        throw new Error('OTP expired or not found. Please request a new code.');
+      }
+
+      if (otpRow.code_hash !== hashValue(code)) {
+        throw new Error('Incorrect OTP. Please try again.');
+      }
+
+      await client.query(
+        `
+          update auth_otps
+          set consumed_at = now()
+          where id = $1
+        `,
+        [otpRow.id]
+      );
+    } else {
+      const verification = await checkVerification(normalizedPhone, code);
+
+      if (String(verification.status || '').toLowerCase() !== 'approved') {
+        throw new Error('Incorrect OTP. Please try again.');
+      }
     }
 
-    if (otpRow.code_hash !== hashValue(code)) {
-      throw new Error('Incorrect OTP. Please try again.');
-    }
-
-    await client.query(
-      `
-        update auth_otps
-        set consumed_at = now()
-        where id = $1
-      `,
-      [otpRow.id]
-    );
-
-    const token = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + env.authSessionDays * 24 * 60 * 60 * 1000);
-
-    await client.query(
-      `
-        insert into user_sessions (
-          user_id,
-          token_hash,
-          expires_at
-        )
-        values ($1, $2, $3)
-      `,
-      [otpRow.user_id, hashValue(token), expiresAt.toISOString()]
-    );
-
+    const session = await createSessionForUser(client, user.id);
     await client.query('commit');
+    resetRateLimit(verifyRateLimitStore, normalizedPhone);
 
     return buildSessionPayload({
-      token,
-      expiresAt: expiresAt.toISOString(),
-      user: {
-        id: otpRow.user_id_value,
-        full_name: otpRow.full_name,
-        phone: otpRow.user_phone,
-        email: otpRow.email,
-        role: otpRow.role,
-        rating: otpRow.rating,
-      },
+      token: session.token,
+      expiresAt: session.expiresAt,
+      user,
     });
   } catch (error) {
     await client.query('rollback');

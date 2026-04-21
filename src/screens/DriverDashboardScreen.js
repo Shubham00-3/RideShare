@@ -26,6 +26,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   acceptDriverRequest,
   fetchDriverTrips,
+  updateDriverLocation,
   updateDriverSettings,
   updateDriverTripStatus,
 } from '../services/api';
@@ -44,6 +45,46 @@ const STATUS_ACTIONS = [
   { label: 'Complete', value: 'completed' },
 ];
 
+function buildNextDriverLocation(booking) {
+  const coordinates = booking?.trip?.routeGeometry?.coordinates;
+
+  if (!Array.isArray(coordinates) || coordinates.length === 0) {
+    return null;
+  }
+
+  const current = booking?.trip?.currentLocation?.coordinates;
+
+  if (!current) {
+    const [longitude, latitude] = coordinates[0];
+    return {
+      latitude,
+      longitude,
+    };
+  }
+
+  let bestIndex = 0;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  coordinates.forEach((point, index) => {
+    const [longitude, latitude] = point;
+    const score =
+      Math.abs(latitude - current.latitude) + Math.abs(longitude - current.longitude);
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  });
+
+  const nextIndex = Math.min(bestIndex + 1, coordinates.length - 1);
+  const [longitude, latitude] = coordinates[nextIndex];
+
+  return {
+    latitude,
+    longitude,
+  };
+}
+
 export default function DriverDashboardScreen() {
   const { token, user } = useAuth();
   const [dashboard, setDashboard] = useState({
@@ -56,6 +97,7 @@ export default function DriverDashboardScreen() {
   const [error, setError] = useState(null);
   const [statusUpdatingBookingId, setStatusUpdatingBookingId] = useState(null);
   const [acceptingRequestId, setAcceptingRequestId] = useState(null);
+  const [locationUpdatingBookingId, setLocationUpdatingBookingId] = useState(null);
   const [settingsUpdating, setSettingsUpdating] = useState(false);
   const isDriver = user?.role === 'driver';
 
@@ -160,6 +202,43 @@ export default function DriverDashboardScreen() {
       Alert.alert('Unable to accept request', message);
     } finally {
       setAcceptingRequestId(null);
+    }
+  }, [loadDriverDashboard, token]);
+
+  const handleAdvanceLocation = useCallback(async (booking) => {
+    if (!token) {
+      return;
+    }
+
+    const nextLocation = buildNextDriverLocation(booking);
+
+    if (!nextLocation) {
+      Alert.alert(
+        'Location unavailable',
+        'This trip needs persisted route geometry before the driver location can advance.'
+      );
+      return;
+    }
+
+    setLocationUpdatingBookingId(booking.bookingId);
+    setError(null);
+
+    try {
+      await updateDriverLocation(
+        {
+          bookingId: booking.bookingId,
+          latitude: nextLocation.latitude,
+          longitude: nextLocation.longitude,
+        },
+        token
+      );
+      await loadDriverDashboard();
+    } catch (locationError) {
+      const message = locationError.message || 'Unable to update live location right now.';
+      setError(message);
+      Alert.alert('Unable to move driver', message);
+    } finally {
+      setLocationUpdatingBookingId(null);
     }
   }, [loadDriverDashboard, token]);
 
@@ -347,6 +426,7 @@ export default function DriverDashboardScreen() {
             const isCompleted = booking.status === 'completed';
             const isCancelled = booking.status === 'cancelled';
             const isUpdating = statusUpdatingBookingId === booking.bookingId;
+            const isMoving = locationUpdatingBookingId === booking.bookingId;
 
             return (
               <View key={booking.bookingId} style={styles.tripCard}>
@@ -386,33 +466,47 @@ export default function DriverDashboardScreen() {
                 </View>
 
                 {!isCompleted && !isCancelled ? (
-                  <View style={styles.actionsWrap}>
-                    {STATUS_ACTIONS.map((action) => {
-                      const isActive = booking.status === action.value;
+                  <>
+                    <View style={styles.actionsWrap}>
+                      {STATUS_ACTIONS.map((action) => {
+                        const isActive = booking.status === action.value;
 
-                      return (
-                        <TouchableOpacity
-                          key={action.value}
-                          style={[
-                            styles.statusAction,
-                            isActive && styles.statusActionActive,
-                            isUpdating && styles.statusActionDisabled,
-                          ]}
-                          disabled={isUpdating}
-                          onPress={() => handleStatusChange(booking.bookingId, action.value)}
-                        >
-                          <Text
+                        return (
+                          <TouchableOpacity
+                            key={action.value}
                             style={[
-                              styles.statusActionText,
-                              isActive && styles.statusActionTextActive,
+                              styles.statusAction,
+                              isActive && styles.statusActionActive,
+                              isUpdating && styles.statusActionDisabled,
                             ]}
+                            disabled={isUpdating}
+                            onPress={() => handleStatusChange(booking.bookingId, action.value)}
                           >
-                            {action.label}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
+                            <Text
+                              style={[
+                                styles.statusActionText,
+                                isActive && styles.statusActionTextActive,
+                              ]}
+                            >
+                              {action.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+
+                    <TouchableOpacity
+                      style={[styles.advanceLocationButton, isMoving && styles.statusActionDisabled]}
+                      disabled={isMoving}
+                      onPress={() => handleAdvanceLocation(booking)}
+                    >
+                      {isMoving ? (
+                        <ActivityIndicator color="#FFF" />
+                      ) : (
+                        <Text style={styles.advanceLocationText}>Advance live location</Text>
+                      )}
+                    </TouchableOpacity>
+                  </>
                 ) : null}
               </View>
             );
@@ -660,6 +754,18 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   acceptRequestText: {
+    color: '#FFF',
+    ...FONTS.semiBold,
+  },
+  advanceLocationButton: {
+    marginTop: 10,
+    backgroundColor: COLORS.primary,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  advanceLocationText: {
     color: '#FFF',
     ...FONTS.semiBold,
   },

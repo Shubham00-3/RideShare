@@ -58,6 +58,7 @@ export default function BookingDetailScreen({ navigation, route }) {
       <View style={styles.mapSection}>
         <RouteMap
           style={styles.map}
+          currentLocation={trip.currentLocation || null}
           pickupLocation={trip.pickupLocation || null}
           dropoffLocation={trip.dropoffLocation || null}
           routeGeometry={trip.routeGeometry || null}

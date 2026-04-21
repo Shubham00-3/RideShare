@@ -8,8 +8,10 @@
     "dev": "nodemon src/server.js",
     "seed:dummy": "node scripts/seed-dummy-data.js",
     "reset:demo": "node scripts/reset-demo-data.js",
+    "sync:routes": "node scripts/sync-active-trip-routes.js",
     "healthcheck": "node scripts/healthcheck.js",
-    "smoke": "node scripts/api-smoke-check.js"
+    "smoke": "node scripts/api-smoke-check.js",
+    "test": "jest --runInBand"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -21,6 +23,8 @@
     "react-native": "0.83.2"
   },
   "devDependencies": {
+    "jest": "^30.2.0",
+    "supertest": "^7.1.4",
     "nodemon": "^3.1.14"
   }
 }

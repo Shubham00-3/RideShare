@@ -16,22 +16,23 @@ The project is beyond prototype stage and is very close to a usable MVP.
 
 What is already working:
 
-- phone login flow with OTP-style verification
+- phone login flow with backend sessions and OTP verification
 - persisted rider search and booking flow
 - trip history backed by the database
 - scheduled rides with calendar sync
 - rider cancellation flow
-- driver dashboard with trip controls and request acceptance
+- driver dashboard with trip controls, request acceptance, and live location updates
 - map autocomplete and route preview through backend mapping services
+- route-aware matching when request and trip geometry are available
+- active trip polling backed by persisted trip state
 - native Android development build support
 
 What is still not fully production-ready:
 
-- real SMS OTP delivery is not integrated yet
+- real SMS OTP delivery depends on Twilio Verify configuration
 - payment processing is still UI-only
 - realtime transport is still polling-based, not websocket-based
-- booking access-control hardening should still be completed on all read paths
-- automated test coverage is still minimal
+- automated coverage is now in place for the backend, but is still not exhaustive
 
 ## Core product idea
 
@@ -80,6 +81,7 @@ RideShare Connect is built around three ideas:
 - rider booking history endpoint
 - rider booking cancellation
 - driver dashboard APIs
+- driver live location update API
 - driver trip status update APIs
 - driver request acceptance APIs
 - map autocomplete and route preview endpoints
@@ -413,6 +415,20 @@ npm run api:health
 npm run api:smoke
 ```
 
+To exercise the authenticated rider and driver flow as well:
+
+```bash
+SMOKE_BOOKING_WRITE=true npm run api:smoke
+```
+
+The authenticated smoke flow expects `AUTH_EXPOSE_DEV_OTP=true` for local development.
+
+### Backend automated tests
+
+```bash
+npm --prefix backend test
+```
+
 ### Manual rider test
 
 1. Start the backend.
@@ -455,8 +471,7 @@ These are the main gaps still remaining before production:
 - real SMS OTP delivery
 - payment gateway integration
 - websocket-based realtime updates
-- stronger endpoint authorization hardening
-- fuller automated testing
+- broader automated coverage beyond the current backend suite
 - deployment and ops setup
 
 ## MVP assessment

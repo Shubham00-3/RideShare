@@ -1,11 +1,74 @@
 const db = require('../config/db');
+const {
+  clamp,
+  getLineDistanceKm,
+  getPointAtLineProgress,
+  getRouteProgressFromLocation,
+  toNumber,
+} = require('./routeMath');
 
-function toNumber(value) {
-  return Number(value || 0);
-}
+const BOOKING_SELECT_COLUMNS = `
+  b.id as booking_id,
+  b.booking_status,
+  b.quoted_total,
+  b.shared_savings,
+  b.payment_method,
+  b.created_at as booking_created_at,
+  rr.id as ride_request_id,
+  rr.rider_id,
+  rr.pickup_label,
+  rr.dropoff_label,
+  rr.pickup_lat,
+  rr.pickup_lng,
+  rr.dropoff_lat,
+  rr.dropoff_lng,
+  rr.ride_type,
+  rr.allow_mid_trip_pickup,
+  rr.departure_time,
+  rr.origin_km,
+  rr.destination_km,
+  rr.route_distance_meters,
+  rr.route_duration_seconds,
+  rr.route_geometry,
+  rr.seats_required,
+  rr.created_at as request_created_at,
+  at.id as active_trip_id,
+  at.status as active_trip_status,
+  at.allow_mid_trip_join,
+  at.route_geometry as active_route_geometry,
+  at.route_distance_meters as active_route_distance_meters,
+  at.route_duration_seconds as active_route_duration_seconds,
+  at.current_lat,
+  at.current_lng,
+  at.last_location_at,
+  at.started_at as trip_started_at,
+  at.completed_at as trip_completed_at,
+  v.display_name as vehicle_name,
+  v.vehicle_type,
+  v.eta_minutes as vehicle_eta_minutes,
+  d.full_name as driver_name,
+  d.rating as driver_rating,
+  d.trip_count as driver_trip_count,
+  driver_user.id as driver_user_id,
+  driver_user.phone as driver_phone,
+  rider_user.full_name as rider_name,
+  rider_user.phone as rider_phone
+`;
 
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
+const BOOKING_JOINS = `
+  from bookings b
+  left join ride_requests rr on rr.id = b.ride_request_id
+  left join active_trips at on at.id = b.active_trip_id
+  left join vehicles v on v.id = at.vehicle_id
+  left join drivers d on d.id = at.driver_id
+  left join users driver_user on driver_user.id = d.user_id
+  left join users rider_user on rider_user.id = rr.rider_id
+`;
+
+function buildStatusError(message, statusCode) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
 }
 
 function isUuid(value) {
@@ -18,92 +81,165 @@ function estimateDurationMinutes(distanceKm) {
   return Math.max(Math.round(toNumber(distanceKm) * 2.3), 15);
 }
 
-function buildLiveTripState({
-  allowMidTripPickup,
-  bookingCreatedAt,
-  bookingStatus,
-  departureTime,
-  distanceKm,
-  durationMinutes,
-  vehicleEtaMinutes,
-}) {
-  const normalizedBookingStatus = String(bookingStatus || 'confirmed');
-  const arrivalMinutes = clamp(Math.round(toNumber(vehicleEtaMinutes || 4)), 2, 8);
-  const demoDriveMinutes = clamp(Math.round(durationMinutes * 0.35), 6, 18);
-  const totalTimelineMinutes = arrivalMinutes + demoDriveMinutes;
-  const createdAt = bookingCreatedAt ? new Date(bookingCreatedAt) : new Date();
-  const scheduledDeparture = departureTime ? new Date(departureTime) : null;
-  const timelineStart =
-    scheduledDeparture && scheduledDeparture.getTime() > createdAt.getTime()
-      ? scheduledDeparture
-      : createdAt;
+function parseLocation(label, latitude, longitude) {
+  if (latitude == null || longitude == null) {
+    return null;
+  }
+
+  return {
+    label,
+    coordinates: {
+      latitude: toNumber(latitude),
+      longitude: toNumber(longitude),
+    },
+  };
+}
+
+function parseCurrentLocation(row, routeGeometry, progressHint) {
+  if (row.current_lat != null && row.current_lng != null) {
+    return {
+      label: row.driver_name ? `${row.driver_name} live location` : 'Driver live location',
+      coordinates: {
+        latitude: toNumber(row.current_lat),
+        longitude: toNumber(row.current_lng),
+      },
+      lastUpdatedAt: row.last_location_at || null,
+    };
+  }
+
+  if (!routeGeometry) {
+    return null;
+  }
+
+  const fallbackPoint = getPointAtLineProgress(routeGeometry, progressHint);
+
+  if (!fallbackPoint) {
+    return null;
+  }
+
+  return {
+    label: row.driver_name ? `${row.driver_name} route` : 'Driver route',
+    coordinates: fallbackPoint,
+    lastUpdatedAt: row.last_location_at || null,
+  };
+}
+
+function buildLiveTripState(row) {
+  const routeGeometry = row.active_route_geometry || row.route_geometry || null;
+  const pickupLabel = row.pickup_label || 'Pickup';
+  const dropoffLabel = row.dropoff_label || 'Dropoff';
+  const fallbackDistanceKm = Math.max(
+    Number((toNumber(row.destination_km) - toNumber(row.origin_km)).toFixed(1)),
+    0
+  );
+  const routeDistanceKm =
+    toNumber(row.active_route_distance_meters || row.route_distance_meters) > 0
+      ? toNumber(row.active_route_distance_meters || row.route_distance_meters) / 1000
+      : getLineDistanceKm(routeGeometry) || fallbackDistanceKm;
+  const routeDurationMinutes =
+    toNumber(row.active_route_duration_seconds || row.route_duration_seconds) > 0
+      ? Math.max(
+          Math.round(toNumber(row.active_route_duration_seconds || row.route_duration_seconds) / 60),
+          1
+        )
+      : estimateDurationMinutes(routeDistanceKm || fallbackDistanceKm);
+  const allowMidTripPickup = row.allow_mid_trip_pickup ?? row.allow_mid_trip_join ?? true;
+  const bookingStatus = String(row.booking_status || 'confirmed').trim().toLowerCase();
+  const scheduledDeparture = row.departure_time ? new Date(row.departure_time) : null;
+  const startedAt = row.trip_started_at ? new Date(row.trip_started_at) : null;
+  const completedAt = row.trip_completed_at ? new Date(row.trip_completed_at) : null;
   const now = new Date();
   const minutesUntilDeparture = scheduledDeparture
     ? Math.max(Math.ceil((scheduledDeparture.getTime() - now.getTime()) / 60000), 0)
     : 0;
-  const isScheduled =
-    minutesUntilDeparture > 0 &&
-    !['completed', 'cancelled', 'on_trip', 'arriving_soon'].includes(normalizedBookingStatus);
-  const rawElapsedMinutes = Math.max((now.getTime() - timelineStart.getTime()) / 60000, 0);
-  const elapsedMinutes =
-    normalizedBookingStatus === 'completed' ? totalTimelineMinutes : rawElapsedMinutes;
-  const totalProgress = clamp(elapsedMinutes / totalTimelineMinutes, 0, 1);
-  const isCompleted = normalizedBookingStatus === 'completed' || totalProgress >= 1;
-  const rideElapsedMinutes = Math.max(elapsedMinutes - arrivalMinutes, 0);
-  let rideProgress = clamp(rideElapsedMinutes / demoDriveMinutes, 0, 1);
-  const remainingMinutes = isCompleted ? 0 : Math.max(Math.ceil(totalTimelineMinutes - elapsedMinutes), 1);
+  const isScheduled = bookingStatus === 'confirmed' && minutesUntilDeparture > 0;
+  const persistedLocation =
+    row.current_lat != null && row.current_lng != null
+      ? {
+          latitude: toNumber(row.current_lat),
+          longitude: toNumber(row.current_lng),
+        }
+      : null;
+  const routeProgressMatch =
+    routeGeometry && persistedLocation
+      ? getRouteProgressFromLocation(routeGeometry, persistedLocation)
+      : null;
 
-  if (normalizedBookingStatus === 'on_trip') {
-    rideProgress = Math.max(rideProgress, 0.2);
-  }
+  let progress = 0;
 
-  if (normalizedBookingStatus === 'arriving_soon') {
-    rideProgress = Math.max(rideProgress, 0.82);
+  if (bookingStatus === 'completed' || completedAt) {
+    progress = 1;
+  } else if (routeProgressMatch) {
+    progress = routeProgressMatch.progress;
+  } else if (startedAt && ['on_trip', 'arriving_soon'].includes(bookingStatus)) {
+    progress = clamp(
+      (now.getTime() - startedAt.getTime()) / (routeDurationMinutes * 60 * 1000),
+      0,
+      0.98
+    );
+  } else if (bookingStatus === 'arriving_soon') {
+    progress = 0.84;
+  } else if (bookingStatus === 'on_trip') {
+    progress = 0.32;
   }
 
   let tripStatus = isScheduled ? 'scheduled' : 'driver_arriving';
   let phaseLabel = isScheduled ? 'Ride scheduled' : 'Driver arriving';
   let nextStopLabel = isScheduled ? 'Scheduled pickup' : 'Pickup point';
 
-  if (normalizedBookingStatus === 'cancelled') {
+  if (bookingStatus === 'cancelled') {
     tripStatus = 'cancelled';
     phaseLabel = 'Trip cancelled';
     nextStopLabel = 'Cancelled';
-  } else if (isCompleted) {
+  } else if (bookingStatus === 'completed' || completedAt) {
     tripStatus = 'completed';
     phaseLabel = 'Trip completed';
     nextStopLabel = 'Dropoff reached';
-  } else if (normalizedBookingStatus === 'arriving_soon') {
+    progress = 1;
+  } else if (bookingStatus === 'arriving_soon') {
     tripStatus = 'arriving_soon';
     phaseLabel = 'Arriving soon';
     nextStopLabel = 'Dropoff point';
-  } else if (normalizedBookingStatus === 'on_trip') {
-    tripStatus = 'on_trip';
-    phaseLabel = 'Ride in progress';
-    nextStopLabel = 'Dropoff point';
-  } else if (elapsedMinutes < arrivalMinutes) {
-    tripStatus = 'driver_arriving';
-    phaseLabel = 'Driver arriving';
-    nextStopLabel = 'Pickup point';
-  } else if (rideProgress < 0.72) {
-    tripStatus = 'on_trip';
-    phaseLabel = 'Ride in progress';
-    nextStopLabel = 'Dropoff point';
-  } else {
-    tripStatus = 'arriving_soon';
-    phaseLabel = 'Arriving soon';
+  } else if (bookingStatus === 'on_trip') {
+    tripStatus = progress >= 0.82 ? 'arriving_soon' : 'on_trip';
+    phaseLabel = tripStatus === 'arriving_soon' ? 'Arriving soon' : 'Ride in progress';
     nextStopLabel = 'Dropoff point';
   }
 
   const remainingDistanceKm =
     tripStatus === 'scheduled' || tripStatus === 'driver_arriving'
-      ? distanceKm
-      : tripStatus === 'completed'
+      ? Number(routeDistanceKm.toFixed(1))
+      : tripStatus === 'completed' || tripStatus === 'cancelled'
         ? 0
-        : Number((distanceKm * (1 - rideProgress)).toFixed(1));
-
+        : Number((routeDistanceKm * (1 - progress)).toFixed(1));
+  const remainingMinutes =
+    tripStatus === 'scheduled'
+      ? minutesUntilDeparture
+      : tripStatus === 'driver_arriving'
+        ? Math.max(Math.round(toNumber(row.vehicle_eta_minutes || 4)), 1)
+        : tripStatus === 'completed' || tripStatus === 'cancelled'
+          ? 0
+          : Math.max(Math.round(routeDurationMinutes * (1 - progress)), 1);
+  const driverEtaMinutes =
+    tripStatus === 'driver_arriving' ? Math.max(Math.round(toNumber(row.vehicle_eta_minutes || 4)), 1) : 0;
+  const effectiveStart =
+    startedAt ||
+    (tripStatus === 'scheduled'
+      ? scheduledDeparture
+      : new Date(now.getTime() - progress * routeDurationMinutes * 60 * 1000));
+  const estimatedCompletionAt =
+    tripStatus === 'completed' && completedAt
+      ? completedAt.toISOString()
+      : effectiveStart
+        ? new Date(effectiveStart.getTime() + routeDurationMinutes * 60 * 1000).toISOString()
+        : new Date(now.getTime() + remainingMinutes * 60 * 1000).toISOString();
+  const currentLocation = parseCurrentLocation(
+    row,
+    routeGeometry,
+    tripStatus === 'driver_arriving' ? 0.04 : progress
+  );
   const midTripOffer =
-    allowMidTripPickup && tripStatus === 'on_trip' && rideProgress >= 0.25 && rideProgress <= 0.68
+    allowMidTripPickup && tripStatus === 'on_trip' && progress >= 0.25 && progress <= 0.68
       ? {
           title: 'Another rider can join nearby',
           discount: 40,
@@ -111,18 +247,22 @@ function buildLiveTripState({
       : null;
 
   return {
-    driverEtaMinutes: tripStatus === 'driver_arriving' ? remainingMinutes : 0,
-    estimatedCompletionAt: new Date(
-      timelineStart.getTime() + totalTimelineMinutes * 60 * 1000
-    ).toISOString(),
-    lastUpdatedAt: now.toISOString(),
-    liveTimelineMinutes: totalTimelineMinutes,
+    currentLocation,
+    distanceKm: Number(routeDistanceKm.toFixed(1)),
+    driverEtaMinutes,
+    durationMinutes: routeDurationMinutes,
+    estimatedCompletionAt,
+    lastUpdatedAt: row.last_location_at || now.toISOString(),
+    liveTimelineMinutes: routeDurationMinutes,
     midTripOffer,
     nextStopLabel,
     phaseLabel,
-    progress: Number((tripStatus === 'scheduled' ? 0 : totalProgress).toFixed(2)),
+    progress: Number(progress.toFixed(2)),
     remainingDistanceKm,
-    remainingMinutes: tripStatus === 'scheduled' ? minutesUntilDeparture : remainingMinutes,
+    remainingMinutes,
+    routeGeometry,
+    routeDistanceMeters: Math.round(routeDistanceKm * 1000),
+    routeDurationSeconds: routeDurationMinutes * 60,
     status: tripStatus,
   };
 }
@@ -134,24 +274,10 @@ function normalizeBookingRow(row) {
 
   const pickupLabel = row.pickup_label || 'Pickup';
   const dropoffLabel = row.dropoff_label || 'Dropoff';
-  const distanceKm = Math.max(
-    Number((toNumber(row.destination_km) - toNumber(row.origin_km)).toFixed(1)),
-    0
-  );
-  const allowMidTripPickup = row.allow_mid_trip_pickup ?? row.allow_mid_trip_join ?? true;
   const driverName = row.driver_name || 'Assigned driver';
   const vehicleName = row.vehicle_name || 'Assigned vehicle';
   const vehicleType = row.vehicle_type || 'Shared ride';
-  const durationMinutes = estimateDurationMinutes(distanceKm);
-  const liveTripState = buildLiveTripState({
-    allowMidTripPickup,
-    bookingCreatedAt: row.booking_created_at || row.created_at,
-    bookingStatus: row.booking_status,
-    departureTime: row.departure_time,
-    distanceKm,
-    durationMinutes,
-    vehicleEtaMinutes: row.vehicle_eta_minutes,
-  });
+  const liveTripState = buildLiveTripState(row);
   const bookingStatus =
     row.booking_status === 'confirmed' && liveTripState.status === 'completed'
       ? 'completed'
@@ -159,7 +285,9 @@ function normalizeBookingRow(row) {
 
   return {
     bookingId: row.booking_id,
-    createdAt: row.booking_created_at || row.created_at || null,
+    createdAt: row.booking_created_at || row.request_created_at || null,
+    paymentMethod: row.payment_method,
+    source: 'api',
     status: bookingStatus,
     rider:
       row.rider_name || row.rider_phone
@@ -173,37 +301,20 @@ function normalizeBookingRow(row) {
       status: liveTripState.status,
       pickup: pickupLabel,
       dropoff: dropoffLabel,
-      pickupLocation:
-        row.pickup_lat != null && row.pickup_lng != null
-          ? {
-              label: pickupLabel,
-              coordinates: {
-                latitude: toNumber(row.pickup_lat),
-                longitude: toNumber(row.pickup_lng),
-              },
-            }
-          : null,
-      dropoffLocation:
-        row.dropoff_lat != null && row.dropoff_lng != null
-          ? {
-              label: dropoffLabel,
-              coordinates: {
-                latitude: toNumber(row.dropoff_lat),
-                longitude: toNumber(row.dropoff_lng),
-              },
-            }
-          : null,
+      pickupLocation: parseLocation(pickupLabel, row.pickup_lat, row.pickup_lng),
+      dropoffLocation: parseLocation(dropoffLabel, row.dropoff_lat, row.dropoff_lng),
+      currentLocation: liveTripState.currentLocation,
       routeLabel: `${pickupLabel.split(',')[0]} -> ${dropoffLabel.split(',')[0]}`,
       rideType: row.ride_type || 'shared',
       departureTime: row.departure_time || null,
-      allowMidTripPickup,
+      allowMidTripPickup: row.allow_mid_trip_pickup ?? row.allow_mid_trip_join ?? true,
       etaMinutes: liveTripState.remainingMinutes,
       driverEtaMinutes: liveTripState.driverEtaMinutes,
-      durationMinutes,
-      distanceKm,
-      routeGeometry: row.route_geometry || null,
-      routeDurationSeconds: toNumber(row.route_duration_seconds),
-      routeDistanceMeters: toNumber(row.route_distance_meters),
+      durationMinutes: liveTripState.durationMinutes,
+      distanceKm: liveTripState.distanceKm,
+      routeGeometry: liveTripState.routeGeometry,
+      routeDurationSeconds: liveTripState.routeDurationSeconds,
+      routeDistanceMeters: liveTripState.routeDistanceMeters,
       estimatedCompletionAt: liveTripState.estimatedCompletionAt,
       fareTotal: Math.round(toNumber(row.quoted_total)),
       fareSavings: Math.round(toNumber(row.shared_savings)),
@@ -230,6 +341,35 @@ function normalizeBookingRow(row) {
   };
 }
 
+function assertBookingViewerAccess(row, viewer = {}) {
+  const { userId = null, userRole = null } = viewer;
+
+  if (!userId) {
+    return;
+  }
+
+  if (row.rider_id === userId || row.driver_user_id === userId || userRole === 'admin') {
+    return;
+  }
+
+  throw buildStatusError('You do not have access to this booking.', 403);
+}
+
+async function fetchBookingRow(whereClause, params = []) {
+  const result = await db.query(
+    `
+      select
+        ${BOOKING_SELECT_COLUMNS}
+      ${BOOKING_JOINS}
+      ${whereClause}
+      limit 1
+    `,
+    params
+  );
+
+  return result.rows[0] || null;
+}
+
 async function fetchActiveTripSnapshot(client, tripId) {
   if (!tripId) {
     return null;
@@ -240,7 +380,12 @@ async function fetchActiveTripSnapshot(client, tripId) {
       select
         t.id,
         t.available_seats,
-        t.allow_mid_trip_join
+        t.allow_mid_trip_join,
+        t.route_geometry,
+        t.route_distance_meters,
+        t.route_duration_seconds,
+        t.current_lat,
+        t.current_lng
       from active_trips t
       where t.id = $1
       limit 1
@@ -251,60 +396,79 @@ async function fetchActiveTripSnapshot(client, tripId) {
   return result.rows[0] || null;
 }
 
-async function getBookingById(bookingId) {
+async function ensureRideRequestOwnership(client, rideRequestId, userId) {
+  const rideRequestResult = await client.query(
+    `
+      select
+        id,
+        rider_id,
+        status
+      from ride_requests
+      where id = $1
+      limit 1
+    `,
+    [rideRequestId]
+  );
+
+  const rideRequest = rideRequestResult.rows[0];
+
+  if (!rideRequest) {
+    throw buildStatusError('Ride request not found.', 404);
+  }
+
+  if (rideRequest.rider_id && rideRequest.rider_id !== userId) {
+    throw buildStatusError('You can only book your own ride requests.', 403);
+  }
+
+  if (!rideRequest.rider_id) {
+    await client.query(
+      `
+        update ride_requests
+        set rider_id = $2
+        where id = $1
+      `,
+      [rideRequestId, userId]
+    );
+  }
+
+  return rideRequest;
+}
+
+async function initializeTripLocation(client, tripId, routeGeometry) {
+  const startPoint = getPointAtLineProgress(routeGeometry, 0);
+
+  if (!tripId || !startPoint) {
+    return;
+  }
+
+  await client.query(
+    `
+      update active_trips
+      set
+        current_lat = coalesce(current_lat, $2),
+        current_lng = coalesce(current_lng, $3),
+        last_location_at = coalesce(last_location_at, now())
+      where id = $1
+    `,
+    [tripId, startPoint.latitude, startPoint.longitude]
+  );
+}
+
+async function getBookingById(bookingId, viewer = {}) {
   const pool = db.getPool();
 
   if (!pool) {
     return null;
   }
 
-  const result = await db.query(
-    `
-      select
-        b.id as booking_id,
-        b.booking_status,
-        b.quoted_total,
-        b.shared_savings,
-        b.payment_method,
-        b.created_at as booking_created_at,
-        rr.id as ride_request_id,
-        rr.pickup_label,
-        rr.dropoff_label,
-        rr.pickup_lat,
-        rr.pickup_lng,
-        rr.dropoff_lat,
-        rr.dropoff_lng,
-        rr.ride_type,
-        rr.allow_mid_trip_pickup,
-        rr.departure_time,
-        rr.origin_km,
-        rr.destination_km,
-        rr.route_distance_meters,
-        rr.route_duration_seconds,
-        rr.route_geometry,
-        at.id as active_trip_id,
-        at.status as active_trip_status,
-        at.allow_mid_trip_join,
-        v.display_name as vehicle_name,
-        v.vehicle_type,
-        v.eta_minutes as vehicle_eta_minutes,
-        d.full_name as driver_name,
-        d.rating as driver_rating,
-        d.trip_count as driver_trip_count,
-        u.phone as driver_phone
-      from bookings b
-      left join ride_requests rr on rr.id = b.ride_request_id
-      left join active_trips at on at.id = b.active_trip_id
-      left join vehicles v on v.id = at.vehicle_id
-      left join drivers d on d.id = at.driver_id
-      left join users u on u.id = d.user_id
-      where b.id = $1
-      limit 1
-    `,
-    [bookingId]
-  );
+  const row = await fetchBookingRow('where b.id = $1', [bookingId]);
 
-  return normalizeBookingRow(result.rows[0]);
+  if (!row) {
+    return null;
+  }
+
+  assertBookingViewerAccess(row, viewer);
+  return normalizeBookingRow(row);
 }
 
 async function getBookingsForUser(userId) {
@@ -317,55 +481,15 @@ async function getBookingsForUser(userId) {
   const result = await db.query(
     `
       select
-        b.id as booking_id,
-        b.booking_status,
-        b.quoted_total,
-        b.shared_savings,
-        b.payment_method,
-        b.created_at as booking_created_at,
-        rr.id as ride_request_id,
-        rr.pickup_label,
-        rr.dropoff_label,
-        rr.pickup_lat,
-        rr.pickup_lng,
-        rr.dropoff_lat,
-        rr.dropoff_lng,
-        rr.ride_type,
-        rr.allow_mid_trip_pickup,
-        rr.departure_time,
-        rr.origin_km,
-        rr.destination_km,
-        rr.route_distance_meters,
-        rr.route_duration_seconds,
-        rr.route_geometry,
-        rr.created_at as request_created_at,
-        at.id as active_trip_id,
-        at.status as active_trip_status,
-        at.allow_mid_trip_join,
-        v.display_name as vehicle_name,
-        v.vehicle_type,
-        v.eta_minutes as vehicle_eta_minutes,
-        d.full_name as driver_name,
-        d.rating as driver_rating,
-        d.trip_count as driver_trip_count,
-        u.phone as driver_phone
-      from bookings b
-      join ride_requests rr on rr.id = b.ride_request_id
-      left join active_trips at on at.id = b.active_trip_id
-      left join vehicles v on v.id = at.vehicle_id
-      left join drivers d on d.id = at.driver_id
-      left join users u on u.id = d.user_id
+        ${BOOKING_SELECT_COLUMNS}
+      ${BOOKING_JOINS}
       where rr.rider_id = $1
       order by b.created_at desc
     `,
     [userId]
   );
 
-  return result.rows.map((row) => ({
-    ...normalizeBookingRow(row),
-    createdAt: row.booking_created_at || row.request_created_at,
-    paymentMethod: row.payment_method,
-  }));
+  return result.rows.map(normalizeBookingRow);
 }
 
 async function getDriverBookings(userId) {
@@ -385,48 +509,9 @@ async function getDriverBookings(userId) {
   const result = await db.query(
     `
       select
-        b.id as booking_id,
-        b.booking_status,
-        b.quoted_total,
-        b.shared_savings,
-        b.payment_method,
-        b.created_at as booking_created_at,
-        rr.id as ride_request_id,
-        rr.pickup_label,
-        rr.dropoff_label,
-        rr.pickup_lat,
-        rr.pickup_lng,
-        rr.dropoff_lat,
-        rr.dropoff_lng,
-        rr.ride_type,
-        rr.allow_mid_trip_pickup,
-        rr.departure_time,
-        rr.origin_km,
-        rr.destination_km,
-        rr.route_distance_meters,
-        rr.route_duration_seconds,
-        rr.route_geometry,
-        rr.created_at as request_created_at,
-        at.id as active_trip_id,
-        at.status as active_trip_status,
-        at.allow_mid_trip_join,
-        v.display_name as vehicle_name,
-        v.vehicle_type,
-        v.eta_minutes as vehicle_eta_minutes,
-        d.full_name as driver_name,
-        d.rating as driver_rating,
-        d.trip_count as driver_trip_count,
-        driver_user.phone as driver_phone,
-        rider_user.full_name as rider_name,
-        rider_user.phone as rider_phone
-      from bookings b
-      join active_trips at on at.id = b.active_trip_id
-      join drivers d on d.id = at.driver_id
-      join users driver_user on driver_user.id = d.user_id
-      left join ride_requests rr on rr.id = b.ride_request_id
-      left join vehicles v on v.id = at.vehicle_id
-      left join users rider_user on rider_user.id = rr.rider_id
-      where d.user_id = $1
+        ${BOOKING_SELECT_COLUMNS}
+      ${BOOKING_JOINS}
+      where driver_user.id = $1
       order by
         case when b.booking_status in ('completed', 'cancelled') then 1 else 0 end,
         b.created_at desc
@@ -434,11 +519,7 @@ async function getDriverBookings(userId) {
     [userId]
   );
 
-  const items = result.rows.map((row) => ({
-    ...normalizeBookingRow(row),
-    createdAt: row.booking_created_at || row.request_created_at,
-    paymentMethod: row.payment_method,
-  }));
+  const items = result.rows.map(normalizeBookingRow);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const summary = items.reduce(
@@ -496,6 +577,7 @@ async function updateDriverBookingStatus({ bookingId, status, userId }) {
           b.id as booking_id,
           b.active_trip_id,
           b.ride_request_id,
+          at.route_geometry,
           d.user_id as driver_user_id
         from bookings b
         join active_trips at on at.id = b.active_trip_id
@@ -509,11 +591,11 @@ async function updateDriverBookingStatus({ bookingId, status, userId }) {
     const bookingRow = bookingResult.rows[0];
 
     if (!bookingRow) {
-      throw new Error('Driver booking not found.');
+      throw buildStatusError('Driver booking not found.', 404);
     }
 
     if (bookingRow.driver_user_id !== userId) {
-      throw new Error('You can only update your own driver trips.');
+      throw buildStatusError('You can only update your own driver trips.', 403);
     }
 
     await client.query(
@@ -552,14 +634,44 @@ async function updateDriverBookingStatus({ bookingId, status, userId }) {
             : nextStatus === 'confirmed'
               ? 'open'
               : 'in_progress';
+      const startPoint =
+        nextStatus === 'confirmed' || nextStatus === 'on_trip'
+          ? getPointAtLineProgress(bookingRow.route_geometry, nextStatus === 'confirmed' ? 0 : 0.08)
+          : null;
 
       await client.query(
         `
           update active_trips
-          set status = $2
+          set
+            status = $2,
+            started_at = case
+              when $2 in ('in_progress') then coalesce(started_at, now())
+              else started_at
+            end,
+            completed_at = case
+              when $2 in ('completed', 'cancelled') then now()
+              else completed_at
+            end,
+            current_lat = case
+              when current_lat is null and $3 is not null then $3
+              else current_lat
+            end,
+            current_lng = case
+              when current_lng is null and $4 is not null then $4
+              else current_lng
+            end,
+            last_location_at = case
+              when current_lat is null and $3 is not null then now()
+              else last_location_at
+            end
           where id = $1
         `,
-        [bookingRow.active_trip_id, tripStatus]
+        [
+          bookingRow.active_trip_id,
+          tripStatus,
+          startPoint?.latitude ?? null,
+          startPoint?.longitude ?? null,
+        ]
       );
     }
 
@@ -586,12 +698,6 @@ async function cancelBookingForUser({ bookingId, userId }) {
 
   const client = await pool.connect();
 
-  const buildStatusError = (message, statusCode) => {
-    const error = new Error(message);
-    error.statusCode = statusCode;
-    return error;
-  };
-
   try {
     await client.query('begin');
 
@@ -602,7 +708,8 @@ async function cancelBookingForUser({ bookingId, userId }) {
           b.booking_status,
           b.active_trip_id,
           b.ride_request_id,
-          rr.rider_id
+          rr.rider_id,
+          rr.seats_required
         from bookings b
         join ride_requests rr on rr.id = b.ride_request_id
         where b.id = $1
@@ -623,7 +730,9 @@ async function cancelBookingForUser({ bookingId, userId }) {
 
     if (['completed', 'cancelled'].includes(String(bookingRow.booking_status || '').toLowerCase())) {
       await client.query('commit');
-      return getBookingById(bookingId);
+      return getBookingById(bookingId, {
+        userId,
+      });
     }
 
     await client.query(
@@ -651,19 +760,25 @@ async function cancelBookingForUser({ bookingId, userId }) {
         `
           update active_trips
           set
-            available_seats = available_seats + 1,
+            available_seats = available_seats + $2,
             status = case
               when status in ('completed', 'cancelled') then status
               else 'open'
+            end,
+            completed_at = case
+              when status = 'cancelled' then now()
+              else completed_at
             end
           where id = $1
         `,
-        [bookingRow.active_trip_id]
+        [bookingRow.active_trip_id, Math.max(Number(bookingRow.seats_required || 1), 1)]
       );
     }
 
     await client.query('commit');
-    return getBookingById(bookingId);
+    return getBookingById(bookingId, {
+      userId,
+    });
   } catch (error) {
     await client.query('rollback');
     throw error;
@@ -675,18 +790,18 @@ async function cancelBookingForUser({ bookingId, userId }) {
 function calculateQuote({ request, match, vehicle, options = {} }) {
   const insurance = options.insurance ?? true;
   const allowMidTripPickup = options.allowMidTripPickup ?? true;
-  const baseFare = Math.max(Math.round(request.distanceKm * 8), 100);
-  const distanceFare = Math.max(Math.round((vehicle.fareValue || 0) * 0.64), 120);
+  const baseFare = Math.max(request.distanceKm * 8, 100);
+  const distanceFare = Math.max((vehicle.fareValue || 0) * 0.64, 120);
   const platformFee = 20;
   const insuranceFee = insurance ? 15 : 0;
-  const poolingDiscount = Math.max(Math.round((match.savingsValue || 80) * 0.2), 35);
+  const poolingDiscount = Math.max((match.savingsValue || 80) * 0.2, 35);
   const midTripPickupDiscount = allowMidTripPickup ? 18 : 0;
   const total =
-    baseFare +
-    distanceFare +
+    Math.round(baseFare) +
+    Math.round(distanceFare) +
     platformFee +
     insuranceFee -
-    poolingDiscount -
+    Math.round(poolingDiscount) -
     midTripPickupDiscount;
 
   return {
@@ -694,10 +809,10 @@ function calculateQuote({ request, match, vehicle, options = {} }) {
     matchId: match.id,
     vehicleId: vehicle.providerVehicleId,
     breakdown: {
-      baseFare,
-      distanceFare,
+      baseFare: Math.round(baseFare),
+      distanceFare: Math.round(distanceFare),
       platformFee,
-      poolingDiscount,
+      poolingDiscount: Math.round(poolingDiscount),
       midTripPickupDiscount,
       insuranceFee,
     },
@@ -709,63 +824,21 @@ function calculateQuote({ request, match, vehicle, options = {} }) {
   };
 }
 
-function buildEphemeralBooking({ request, match, vehicle, quote, options = {} }) {
-  const createdAt = Date.now();
-  const etaMinutes =
-    Number(String(vehicle.eta || '4').replace(/[^\d.]/g, '')) || 4;
-
-  return {
-    bookingId: `booking_${createdAt}`,
-    status: 'confirmed',
-    source: 'ephemeral',
-    trip: {
-      id: `trip_${createdAt}`,
-      status: 'driver_arriving',
-      pickup: request.pickup,
-      dropoff: request.dropoff,
-      pickupLocation: request.pickupLocation || null,
-      dropoffLocation: request.dropoffLocation || null,
-      routeLabel: `${request.pickup.split(',')[0]} -> ${request.dropoff.split(',')[0]}`,
-      rideType: request.rideType,
-      allowMidTripPickup: options.allowMidTripPickup ?? true,
-      etaMinutes,
-      durationMinutes: request.durationMinutes,
-      distanceKm: request.distanceKm,
-      routeGeometry: request.route?.geometry || null,
-      routeDurationSeconds: request.route?.durationSeconds || request.durationMinutes * 60,
-      routeDistanceMeters: request.route?.distanceKm
-        ? Math.round(request.route.distanceKm * 1000)
-        : Math.round(request.distanceKm * 1000),
-      fareTotal: quote.totals.total,
-      fareSavings: quote.totals.estimatedSavings,
-      vehicle: {
-        name: vehicle.name,
-        type: vehicle.type,
-        color: 'White',
-        plateNumber: 'DL 01 AB 1234',
-      },
-      driver: {
-        name: vehicle.driver.name,
-        rating: vehicle.driver.rating,
-        trips: vehicle.driver.trips,
-        phone: '+91 99999 11111',
-      },
-      midTripOffer:
-        options.allowMidTripPickup ?? true
-          ? {
-              title: 'New rider joining in 3 min!',
-              discount: 40,
-            }
-          : null,
-    },
-  };
-}
-
-async function confirmBooking({ request, match, vehicle, quote, options = {} }) {
+async function confirmBooking({ request, match, quote, options = {}, userId }) {
   const pool = db.getPool();
 
   if (!pool) {
-    return buildEphemeralBooking({ request, match, vehicle, quote, options });
+    throw new Error('Database is required for booking confirmation.');
+  }
+
+  if (!userId) {
+    throw buildStatusError('Authentication is required.', 401);
+  }
+
+  const rideRequestId = isUuid(request?.id) ? request.id : null;
+
+  if (!rideRequestId) {
+    throw buildStatusError('A persisted ride request is required before booking.', 400);
   }
 
   const client = await pool.connect();
@@ -773,27 +846,27 @@ async function confirmBooking({ request, match, vehicle, quote, options = {} }) 
   try {
     await client.query('begin');
 
-    const rideRequestId = isUuid(request?.id) ? request.id : null;
-    const existingBooking = rideRequestId
-      ? await client.query(
-          `
-            select id
-            from bookings
-            where ride_request_id = $1
-            order by created_at desc
-            limit 1
-          `,
-          [rideRequestId]
-        )
-      : { rows: [] };
+    const rideRequest = await ensureRideRequestOwnership(client, rideRequestId, userId);
+    const existingBooking = await client.query(
+      `
+        select id
+        from bookings
+        where ride_request_id = $1
+        order by created_at desc
+        limit 1
+      `,
+      [rideRequestId]
+    );
 
     if (existingBooking.rows[0]?.id) {
       await client.query('commit');
-      return getBookingById(existingBooking.rows[0].id);
+      return getBookingById(existingBooking.rows[0].id, {
+        userId,
+      });
     }
 
     const activeTrip = await fetchActiveTripSnapshot(client, match?.id);
-    const seatsRequired = Math.max(Number(request?.seatsRequired || 1), 1);
+    const seatsRequired = Math.max(Number(request?.seatsRequired || rideRequest.seats_required || 1), 1);
 
     if (activeTrip) {
       const seatReservation = await client.query(
@@ -810,13 +883,12 @@ async function confirmBooking({ request, match, vehicle, quote, options = {} }) 
       );
 
       if (seatReservation.rows.length === 0) {
-        throw new Error('Selected trip no longer has enough seats available.');
+        throw buildStatusError('Selected trip no longer has enough seats available.', 409);
       }
     }
 
     const activeTripId = activeTrip?.id || null;
     const paymentMethod = String(options.paymentMethod || 'upi');
-
     const insertBooking = await client.query(
       `
         insert into bookings (
@@ -839,23 +911,23 @@ async function confirmBooking({ request, match, vehicle, quote, options = {} }) 
       ]
     );
 
-    if (rideRequestId) {
-      await client.query(
-        `
-          update ride_requests
-          set status = 'booked'
-          where id = $1
-        `,
-        [rideRequestId]
-      );
+    await client.query(
+      `
+        update ride_requests
+        set status = 'booked'
+        where id = $1
+      `,
+      [rideRequestId]
+    );
+
+    if (activeTripId) {
+      await initializeTripLocation(client, activeTripId, activeTrip.route_geometry);
     }
 
     await client.query('commit');
-
-    return (
-      (await getBookingById(insertBooking.rows[0].id)) ||
-      buildEphemeralBooking({ request, match, vehicle, quote, options })
-    );
+    return getBookingById(insertBooking.rows[0].id, {
+      userId,
+    });
   } catch (error) {
     await client.query('rollback');
     throw error;
@@ -868,8 +940,8 @@ module.exports = {
   cancelBookingForUser,
   calculateQuote,
   confirmBooking,
-  getDriverBookings,
   getBookingById,
   getBookingsForUser,
+  getDriverBookings,
   updateDriverBookingStatus,
 };

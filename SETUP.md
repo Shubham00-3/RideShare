@@ -76,6 +76,7 @@ Create `.env` in the repo root using [`.env.example`](./.env.example):
 
 ```env
 EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:4000
+EXPO_PUBLIC_ALLOW_DEV_MOCK_FALLBACKS=false
 ```
 
 Important:
@@ -98,6 +99,9 @@ ALLOWED_ORIGIN=*
 AUTH_EXPOSE_DEV_OTP=true
 AUTH_OTP_TTL_MINUTES=5
 AUTH_SESSION_DAYS=30
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_VERIFY_SERVICE_SID=
 PELIAS_BASE_URL=https://api.geocode.earth/v1/search
 PELIAS_API_KEY=
 VALHALLA_BASE_URL=https://valhalla1.openstreetmap.de/route
@@ -107,9 +111,11 @@ Field notes:
 
 - `DATABASE_URL`: local PostgreSQL connection string
 - `AUTH_EXPOSE_DEV_OTP=true`: useful for development because OTP can be shown without a real SMS provider
+- `TWILIO_*`: required only when you disable dev OTP mode and want real SMS verification
 - `PELIAS_BASE_URL`: backend autocomplete provider endpoint
 - `PELIAS_API_KEY`: needed if your Pelias-compatible provider requires auth
 - `VALHALLA_BASE_URL`: backend route-preview provider endpoint
+- `EXPO_PUBLIC_ALLOW_DEV_MOCK_FALLBACKS=false`: recommended so booking/auth/driver flows fail loudly if the backend is unreachable
 
 ## 6. Set up PostgreSQL
 
@@ -329,6 +335,7 @@ npm run api:health
 npm run api:smoke
 npm run api:seed-dummy
 npm run api:reset-demo
+npm --prefix backend test
 ```
 
 ### Backend
@@ -340,6 +347,8 @@ npm run healthcheck
 npm run smoke
 npm run seed:dummy
 npm run reset:demo
+npm run sync:routes
+npm test
 ```
 
 ## 14. Smoke test flow
@@ -349,13 +358,14 @@ After setup, run this minimum check:
 1. Start backend with `npm run api:dev`
 2. Run `npm run api:health`
 3. Run `npm run api:smoke`
-4. Start the app
-5. Sign in with a test rider
-6. Search and book a ride
-7. Open Activity and verify the booking appears
-8. Open Active Trip and verify it loads
-9. Test scheduled ride flow
-10. Test cancellation flow
+4. Run `SMOKE_BOOKING_WRITE=true npm run api:smoke` for the authenticated rider + driver check
+5. Start the app
+6. Sign in with a test rider
+7. Search and book a ride
+8. Open Activity and verify the booking appears
+9. Open Active Trip and verify it loads
+10. Test scheduled ride flow
+11. Test cancellation flow
 
 ## 15. Common troubleshooting
 

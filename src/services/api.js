@@ -9,6 +9,7 @@ import { Platform } from 'react-native';
 
 const REQUEST_TIMEOUT_MS = 8000;
 const configuredApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim() || '';
+const allowMockFallbacks = process.env.EXPO_PUBLIC_ALLOW_DEV_MOCK_FALLBACKS === 'true';
 
 function resolveApiBaseUrl() {
   if (!configuredApiBaseUrl) {
@@ -151,7 +152,11 @@ export async function previewRideMatches(payload, authToken) {
       body: payload,
     });
   } catch (error) {
-    return buildMockMatchResponse(payload);
+    if (allowMockFallbacks) {
+      return buildMockMatchResponse(payload);
+    }
+
+    throw error;
   }
 }
 
@@ -181,7 +186,11 @@ export async function searchPlaces(query, options = {}) {
     return await requestJson(`/api/maps/autocomplete?${params.toString()}`, {
       method: 'GET',
     });
-  } catch (_error) {
+  } catch (error) {
+    if (!allowMockFallbacks) {
+      throw error;
+    }
+
     return {
       items: buildMockPlaceResults(trimmedQuery),
     };
@@ -197,7 +206,11 @@ export async function fetchRoutePreview(payload) {
     return await requestJson('/api/maps/route', {
       body: payload,
     });
-  } catch (_error) {
+  } catch (error) {
+    if (!allowMockFallbacks) {
+      throw error;
+    }
+
     return buildMockRoutePreview(payload);
   }
 }
@@ -213,7 +226,7 @@ export async function fetchBookingQuote(payload, authToken) {
       body: payload,
     });
   } catch (error) {
-    return buildMockQuote(payload);
+    throw error;
   }
 }
 
@@ -228,7 +241,7 @@ export async function confirmRideBooking(payload, authToken) {
       body: payload,
     });
   } catch (error) {
-    return buildMockBooking(payload);
+    throw error;
   }
 }
 
@@ -315,5 +328,17 @@ export async function acceptDriverRequest(requestId, authToken) {
   return requestJson(`/api/driver/requests/${requestId}/accept`, {
     authToken,
     method: 'POST',
+  });
+}
+
+export async function updateDriverLocation(payload, authToken) {
+  if (!API_BASE_URL) {
+    throw new Error('API base URL is not configured.');
+  }
+
+  return requestJson('/api/driver/me/location', {
+    authToken,
+    body: payload,
+    method: 'PATCH',
   });
 }

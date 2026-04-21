@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const db = require('../src/config/db');
+const { syncActiveTripRoutes } = require('./sync-active-trip-routes');
 
 async function main() {
   const pool = db.getPool();
@@ -13,6 +14,7 @@ async function main() {
   const sql = fs.readFileSync(filePath, 'utf8');
 
   await db.query(sql);
+  const syncedTrips = await syncActiveTripRoutes();
 
   const counts = await db.query(`
     select
@@ -29,6 +31,7 @@ async function main() {
       {
         ok: true,
         counts: counts.rows[0],
+        syncedTrips,
       },
       null,
       2

@@ -15,7 +15,7 @@ function timeoutSignal(timeoutMs) {
 }
 
 async function requestJson(path, options = {}) {
-  const { body, method = 'GET' } = options;
+  const { authToken, body, method = 'GET' } = options;
   const { signal, clear } = timeoutSignal(REQUEST_TIMEOUT_MS);
 
   try {
@@ -24,6 +24,7 @@ async function requestJson(path, options = {}) {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
       signal,
@@ -129,8 +130,30 @@ async function main() {
   };
 
   if (ENABLE_BOOKING_WRITE) {
+    const riderOtp = await requestJson('/api/auth/request-otp', {
+      method: 'POST',
+      body: {
+        phone: '9876543210',
+      },
+    });
+
+    if (!riderOtp.devOtp) {
+      throw new Error(
+        'Authenticated smoke flow requires AUTH_EXPOSE_DEV_OTP=true or another non-interactive test OTP setup.'
+      );
+    }
+
+    const riderSession = await requestJson('/api/auth/verify-otp', {
+      method: 'POST',
+      body: {
+        phone: '9876543210',
+        code: riderOtp.devOtp,
+      },
+    });
+
     const booking = await requestJson('/api/bookings', {
       method: 'POST',
+      authToken: riderSession.token,
       body: {
         request: preview.request,
         match,
@@ -143,12 +166,83 @@ async function main() {
       },
     });
 
-    const fetchedBooking = await requestJson(`/api/bookings/${booking.bookingId}`);
+    const fetchedBooking = await requestJson(`/api/bookings/${booking.bookingId}`, {
+      authToken: riderSession.token,
+    });
+    const riderHistory = await requestJson('/api/me/bookings', {
+      authToken: riderSession.token,
+    });
+
+    await requestJson('/api/ride-requests/preview-match', {
+      method: 'POST',
+      authToken: riderSession.token,
+      body: {
+        pickup: 'Connaught Place, New Delhi',
+        dropoff: 'Akshardham Temple, Delhi',
+        rideType: 'shared',
+        seatsRequired: 1,
+        allowMidTripPickup: true,
+        departureTime: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+      },
+    });
+
+    const driverOtp = await requestJson('/api/auth/request-otp', {
+      method: 'POST',
+      body: {
+        phone: '9999900001',
+      },
+    });
+
+    if (!driverOtp.devOtp) {
+      throw new Error('Driver smoke flow requires a dev OTP to be exposed.');
+    }
+
+    const driverSession = await requestJson('/api/auth/verify-otp', {
+      method: 'POST',
+      body: {
+        phone: '9999900001',
+        code: driverOtp.devOtp,
+      },
+    });
+    const driverDashboard = await requestJson('/api/driver/me/trips', {
+      authToken: driverSession.token,
+    });
+    const pendingRequestId = driverDashboard.pendingRequests?.[0]?.id;
+
+    let acceptedBooking = null;
+
+    if (pendingRequestId) {
+      acceptedBooking = await requestJson(`/api/driver/requests/${pendingRequestId}/accept`, {
+        method: 'POST',
+        authToken: driverSession.token,
+      });
+
+      await requestJson(`/api/driver/bookings/${acceptedBooking.bookingId}/status`, {
+        method: 'PATCH',
+        authToken: driverSession.token,
+        body: {
+          status: 'on_trip',
+        },
+      });
+
+      await requestJson('/api/driver/me/location', {
+        method: 'PATCH',
+        authToken: driverSession.token,
+        body: {
+          bookingId: acceptedBooking.bookingId,
+          latitude: 28.621,
+          longitude: 77.251,
+        },
+      });
+    }
 
     summary.bookingId = booking.bookingId;
     summary.fetchedBookingId = fetchedBooking.bookingId;
     summary.fareTotal = fetchedBooking.trip?.fareTotal;
     summary.persistedDriverName = fetchedBooking.trip?.driver?.name;
+    summary.riderHistoryCount = riderHistory.items?.length || 0;
+    summary.driverDashboardTrips = driverDashboard.items?.length || 0;
+    summary.acceptedBookingId = acceptedBooking?.bookingId || null;
   }
 
   console.log(JSON.stringify(summary, null, 2));

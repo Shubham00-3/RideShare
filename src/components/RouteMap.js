@@ -84,6 +84,7 @@ const mapStyle = {
 };
 
 export default function RouteMap({
+  currentLocation,
   distanceLabel,
   dropoffLocation,
   pickupLocation,
@@ -153,6 +154,21 @@ export default function RouteMap({
             },
           }
         : null,
+      currentLocation?.coordinates
+        ? {
+            type: 'Feature',
+            properties: {
+              kind: 'driver',
+            },
+            geometry: {
+              type: 'Point',
+              coordinates: [
+                currentLocation.coordinates.longitude,
+                currentLocation.coordinates.latitude,
+              ],
+            },
+          }
+        : null,
       dropoffLocation?.coordinates
         ? {
             type: 'Feature',
@@ -210,6 +226,8 @@ export default function RouteMap({
                 ['get', 'kind'],
                 'pickup',
                 COLORS.success,
+                'driver',
+                COLORS.primary,
                 COLORS.error,
               ],
             }}

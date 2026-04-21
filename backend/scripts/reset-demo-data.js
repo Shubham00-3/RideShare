@@ -1,4 +1,5 @@
 const db = require('../src/config/db');
+const { syncActiveTripRoutes } = require('./sync-active-trip-routes');
 
 async function main() {
   const pool = db.getPool();
@@ -52,12 +53,14 @@ async function main() {
     )
     returning id, available_seats, departure_window_start, departure_window_end
   `);
+  const syncedTrips = await syncActiveTripRoutes();
 
   console.log(
     JSON.stringify(
       {
         ok: true,
         resetTrips: result.rows,
+        syncedTrips,
       },
       null,
       2

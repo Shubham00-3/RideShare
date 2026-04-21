@@ -11,6 +11,7 @@ const {
 const {
   acceptIncomingRequest,
   getDriverDashboard,
+  updateDriverLocation,
   updateDriverAvailability,
 } = require('./services/driverDispatchService');
 const {
@@ -26,6 +27,7 @@ const {
   getBookingsForUser,
   updateDriverBookingStatus,
 } = require('./services/bookingService');
+const { assertStartupReadiness, getReadinessStatus } = require('./services/readinessService');
 
 const app = express();
 
@@ -33,15 +35,18 @@ app.use(cors({ origin: env.allowedOrigin }));
 app.use(express.json());
 
 app.get('/health', (_req, res) => {
+  const readiness = getReadinessStatus();
+
   res.json({
     ok: true,
     service: 'rideshare-connect-api',
-    databaseConfigured: Boolean(env.databaseUrl),
-    mapping: {
-      peliasConfigured: Boolean(env.peliasBaseUrl),
-      valhallaConfigured: Boolean(env.valhallaBaseUrl),
-    },
+    readiness,
   });
+});
+
+app.get('/ready', (_req, res) => {
+  const readiness = getReadinessStatus();
+  res.status(readiness.ok ? 200 : 503).json(readiness);
 });
 
 app.get('/api/maps/autocomplete', async (req, res, next) => {
@@ -124,20 +129,27 @@ app.post('/api/bookings/quote', (req, res, next) => {
   }
 });
 
-app.post('/api/bookings', optionalAuth, async (req, res, next) => {
+app.post('/api/bookings', requireAuth, async (req, res, next) => {
   try {
     const payload = req.body || {};
     const quote = payload.quote || calculateQuote(payload);
-    const booking = await confirmBooking({ ...payload, quote });
+    const booking = await confirmBooking({
+      ...payload,
+      quote,
+      userId: req.auth.user.id,
+    });
     res.status(201).json(booking);
   } catch (error) {
     next(error);
   }
 });
 
-app.get('/api/bookings/:id', optionalAuth, async (req, res, next) => {
+app.get('/api/bookings/:id', requireAuth, async (req, res, next) => {
   try {
-    const booking = await getBookingById(req.params.id);
+    const booking = await getBookingById(req.params.id, {
+      userId: req.auth.user.id,
+      userRole: req.auth.user.role,
+    });
 
     if (!booking) {
       return res.status(404).json({
@@ -207,6 +219,27 @@ app.patch('/api/driver/me/settings', requireAuth, async (req, res, next) => {
   }
 });
 
+app.patch('/api/driver/me/location', requireAuth, async (req, res, next) => {
+  try {
+    if (req.auth.user.role !== 'driver') {
+      return res.status(403).json({
+        error: 'forbidden',
+        message: 'Driver access is required for this route.',
+      });
+    }
+
+    const payload = await updateDriverLocation({
+      bookingId: req.body?.bookingId,
+      latitude: req.body?.latitude,
+      longitude: req.body?.longitude,
+      userId: req.auth.user.id,
+    });
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.patch('/api/driver/bookings/:id/status', requireAuth, async (req, res, next) => {
   try {
     if (req.auth.user.role !== 'driver') {
@@ -254,7 +287,10 @@ app.use((error, _req, res, _next) => {
     lowerMessage.includes('otp') ||
     lowerMessage.includes('phone') ||
     lowerMessage.includes('session') ||
-    lowerMessage.includes('authentication')
+    lowerMessage.includes('authentication') ||
+    lowerMessage.includes('latitude') ||
+    lowerMessage.includes('longitude') ||
+    lowerMessage.includes('validation')
       ? 400
       : 500;
   const statusCode = Number(error.statusCode || inferredStatusCode);
@@ -272,6 +308,19 @@ app.use((error, _req, res, _next) => {
   });
 });
 
-app.listen(env.port, () => {
-  console.log(`RideShare Connect API listening on port ${env.port}`);
-});
+function startServer() {
+  assertStartupReadiness();
+
+  return app.listen(env.port, () => {
+    console.log(`RideShare Connect API listening on port ${env.port}`);
+  });
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = {
+  app,
+  startServer,
+};

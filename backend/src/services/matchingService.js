@@ -1,13 +1,7 @@
 const seedCandidates = require('../data/seedCandidates');
 const db = require('../config/db');
-const {
-  buildRoutePreview,
-  ensureCoordinatePayload,
-} = require('./mappingService');
-
-function toNumber(value) {
-  return Number(value || 0);
-}
+const { buildRoutePreview, ensureCoordinatePayload } = require('./mappingService');
+const { getGeometryOverlapScore, toNumber } = require('./routeMath');
 
 function normalizeLocation(value, fallback) {
   return value && String(value).trim().length > 0 ? String(value).trim() : fallback;
@@ -105,56 +99,56 @@ async function persistRideRequest(request, options = {}) {
   }
 
   const { userId = null } = options;
-
   const corridorId =
     request.corridorId && request.corridorId !== 'generic_city_corridor'
       ? request.corridorId
       : null;
 
-  const insertQuery = `
-    insert into ride_requests (
-      rider_id,
-      corridor_id,
-      pickup_label,
-      dropoff_label,
-      pickup_lat,
-      pickup_lng,
-      dropoff_lat,
-      dropoff_lng,
-      origin_km,
-      destination_km,
-      route_distance_meters,
-      route_duration_seconds,
-      route_geometry,
-      ride_type,
-      seats_required,
-      allow_mid_trip_pickup,
-      departure_time,
-      status
-    )
-    values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, 'searching')
-    returning id
-  `;
-
-  const result = await db.query(insertQuery, [
-    userId,
-    corridorId,
-    request.pickup,
-    request.dropoff,
-    request.pickupLocation?.coordinates?.latitude ?? null,
-    request.pickupLocation?.coordinates?.longitude ?? null,
-    request.dropoffLocation?.coordinates?.latitude ?? null,
-    request.dropoffLocation?.coordinates?.longitude ?? null,
-    request.originKm,
-    request.destinationKm,
-    request.route?.distanceKm ? Math.round(request.route.distanceKm * 1000) : null,
-    request.route?.durationSeconds || null,
-    request.route?.geometry ? JSON.stringify(request.route.geometry) : null,
-    request.rideType,
-    request.seatsRequired,
-    request.allowMidTripPickup,
-    request.departureTime,
-  ]);
+  const result = await db.query(
+    `
+      insert into ride_requests (
+        rider_id,
+        corridor_id,
+        pickup_label,
+        dropoff_label,
+        pickup_lat,
+        pickup_lng,
+        dropoff_lat,
+        dropoff_lng,
+        origin_km,
+        destination_km,
+        route_distance_meters,
+        route_duration_seconds,
+        route_geometry,
+        ride_type,
+        seats_required,
+        allow_mid_trip_pickup,
+        departure_time,
+        status
+      )
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, 'searching')
+      returning id
+    `,
+    [
+      userId,
+      corridorId,
+      request.pickup,
+      request.dropoff,
+      request.pickupLocation?.coordinates?.latitude ?? null,
+      request.pickupLocation?.coordinates?.longitude ?? null,
+      request.dropoffLocation?.coordinates?.latitude ?? null,
+      request.dropoffLocation?.coordinates?.longitude ?? null,
+      request.originKm,
+      request.destinationKm,
+      request.route?.distanceKm ? Math.round(request.route.distanceKm * 1000) : null,
+      request.route?.durationSeconds || null,
+      request.route?.geometry ? JSON.stringify(request.route.geometry) : null,
+      request.rideType,
+      request.seatsRequired,
+      request.allowMidTripPickup,
+      request.departureTime,
+    ]
+  );
 
   return {
     ...request,
@@ -167,24 +161,54 @@ function overlapWindow(aStart, aEnd, bStart, bEnd) {
     new Date(bStart).getTime() <= new Date(aEnd).getTime();
 }
 
-function overlapScore(request, candidate) {
+function computeCorridorOverlapScore(request, candidate) {
   const overlapKm = Math.max(
     0,
     Math.min(request.destinationKm, candidate.destination_km) -
       Math.max(request.originKm, candidate.origin_km)
   );
-  const requestDistance = Math.max(request.destinationKm - request.originKm, 1);
+  const requestDistance = Math.max(request.distanceKm || request.destinationKm - request.originKm, 1);
   const overlapRatio = overlapKm / requestDistance;
   const detourMinutes =
     Math.abs(request.originKm - candidate.origin_km) * 1.1 +
     Math.abs(request.destinationKm - candidate.destination_km) * 1.4;
 
   return {
+    detourMinutes: Number(detourMinutes.toFixed(0)),
     overlapKm: Number(overlapKm.toFixed(1)),
     overlapRatio: Number(overlapRatio.toFixed(2)),
-    detourMinutes: Number(detourMinutes.toFixed(0)),
     score: Number((overlapRatio * 100 - detourMinutes).toFixed(1)),
+    source: 'corridor',
   };
+}
+
+function overlapScore(request, candidate) {
+  const requestGeometry = request.route?.geometry || null;
+  const candidateGeometry = candidate.route_geometry || null;
+  const geometryOverlap =
+    requestGeometry && candidateGeometry
+      ? getGeometryOverlapScore({
+          requestDistanceKm: request.distanceKm,
+          requestGeometry,
+          candidateGeometry,
+        })
+      : null;
+
+  if (geometryOverlap) {
+    const detourMinutes =
+      Math.abs(request.originKm - toNumber(candidate.origin_km)) * 0.8 +
+      Math.abs(request.destinationKm - toNumber(candidate.destination_km)) * 1.05;
+
+    return {
+      detourMinutes: Number(detourMinutes.toFixed(0)),
+      overlapKm: geometryOverlap.overlapKm,
+      overlapRatio: geometryOverlap.overlapRatio,
+      score: Number((geometryOverlap.overlapRatio * 115 - detourMinutes).toFixed(1)),
+      source: 'geometry',
+    };
+  }
+
+  return computeCorridorOverlapScore(request, candidate);
 }
 
 function vehicleVariants(candidate, overlapRatio) {
@@ -239,6 +263,7 @@ function buildMatch(request, candidate) {
   return {
     id: candidate.id,
     requestId: request.id,
+    overlapSource: metrics.source,
     passenger: {
       name: 'Compatible corridor rider',
       rating: 4.8,
@@ -268,44 +293,44 @@ function buildMatch(request, candidate) {
 }
 
 async function fetchCandidateRows(request) {
-  const query = `
-    select
-      t.id,
-      c.id as corridor_id,
-      c.label as corridor_label,
-      c.direction,
-      t.origin_label,
-      t.destination_label,
-      t.origin_km,
-      t.destination_km,
-      t.departure_window_start,
-      t.departure_window_end,
-      t.base_solo_fare,
-      t.available_seats,
-      t.allow_mid_trip_join,
-      d.full_name as driver_name,
-      d.rating as driver_rating,
-      d.trip_count as driver_trip_count,
-      v.display_name as vehicle_name,
-      v.vehicle_type,
-      v.category as vehicle_category,
-      v.rate_per_km as vehicle_rate_per_km,
-      v.eta_minutes as vehicle_eta_minutes
-    from active_trips t
-    join corridors c on c.id = t.corridor_id
-    join drivers d on d.id = t.driver_id
-    join vehicles v on v.id = t.vehicle_id
-    where t.status = 'open'
-      and t.corridor_id = $1
-      and c.direction = $2
-      and t.available_seats >= $3
-  `;
-
-  const result = await db.query(query, [
-    request.corridorId,
-    request.direction,
-    request.seatsRequired,
-  ]);
+  const result = await db.query(
+    `
+      select
+        t.id,
+        c.id as corridor_id,
+        c.label as corridor_label,
+        c.direction,
+        t.origin_label,
+        t.destination_label,
+        t.origin_km,
+        t.destination_km,
+        t.departure_window_start,
+        t.departure_window_end,
+        t.base_solo_fare,
+        t.available_seats,
+        t.allow_mid_trip_join,
+        t.route_geometry,
+        t.route_distance_meters,
+        t.route_duration_seconds,
+        d.full_name as driver_name,
+        d.rating as driver_rating,
+        d.trip_count as driver_trip_count,
+        v.display_name as vehicle_name,
+        v.vehicle_type,
+        v.category as vehicle_category,
+        v.rate_per_km as vehicle_rate_per_km,
+        v.eta_minutes as vehicle_eta_minutes
+      from active_trips t
+      join corridors c on c.id = t.corridor_id
+      join drivers d on d.id = t.driver_id
+      join vehicles v on v.id = t.vehicle_id
+      where t.status = 'open'
+        and t.corridor_id = $1
+        and c.direction = $2
+        and t.available_seats >= $3
+    `,
+    [request.corridorId, request.direction, request.seatsRequired]
+  );
 
   return result.rows.length > 0 ? result.rows : seedCandidates;
 }

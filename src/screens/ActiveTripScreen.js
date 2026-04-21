@@ -144,6 +144,7 @@ export default function ActiveTripScreen({ navigation }) {
       <View style={styles.mapArea}>
         <RouteMap
           style={styles.mapPlaceholder}
+          currentLocation={activeTrip.currentLocation}
           pickupLocation={activeTrip.pickupLocation}
           dropoffLocation={activeTrip.dropoffLocation}
           routeGeometry={activeTrip.routeGeometry}

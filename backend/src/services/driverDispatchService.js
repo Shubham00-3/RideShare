@@ -1,11 +1,14 @@
 const db = require('../config/db');
-const { getDriverBookings, getBookingById } = require('./bookingService');
+const { getBookingById, getDriverBookings } = require('./bookingService');
+const { getGeometryOverlapScore, toNumber } = require('./routeMath');
 
-function toNumber(value) {
-  return Number(value || 0);
+function buildStatusError(message, statusCode) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
 }
 
-function overlapScore(request, trip) {
+function computeCorridorOverlapScore(request, trip) {
   const overlapKm = Math.max(
     0,
     Math.min(toNumber(request.destination_km), toNumber(trip.destination_km)) -
@@ -26,6 +29,33 @@ function overlapScore(request, trip) {
     overlapRatio: Number(overlapRatio.toFixed(2)),
     score: Number((overlapRatio * 100 - detourMinutes).toFixed(1)),
   };
+}
+
+function overlapScore(request, trip) {
+  const geometryOverlap =
+    request.route_geometry && trip.route_geometry
+      ? getGeometryOverlapScore({
+          requestDistanceKm:
+            Math.max(toNumber(request.destination_km) - toNumber(request.origin_km), 1),
+          requestGeometry: request.route_geometry,
+          candidateGeometry: trip.route_geometry,
+        })
+      : null;
+
+  if (geometryOverlap) {
+    const detourMinutes =
+      Math.abs(toNumber(request.origin_km) - toNumber(trip.origin_km)) * 0.8 +
+      Math.abs(toNumber(request.destination_km) - toNumber(trip.destination_km)) * 1.05;
+
+    return {
+      detourMinutes: Number(detourMinutes.toFixed(0)),
+      overlapKm: geometryOverlap.overlapKm,
+      overlapRatio: geometryOverlap.overlapRatio,
+      score: Number((geometryOverlap.overlapRatio * 115 - detourMinutes).toFixed(1)),
+    };
+  }
+
+  return computeCorridorOverlapScore(request, trip);
 }
 
 async function getDriverRecord(userId) {
@@ -78,6 +108,7 @@ async function getDriverOpenTrips(userId) {
         at.base_solo_fare,
         at.departure_window_start,
         at.departure_window_end,
+        at.route_geometry,
         v.display_name as vehicle_name,
         v.vehicle_type,
         v.eta_minutes as vehicle_eta_minutes
@@ -141,6 +172,7 @@ async function getIncomingRequestsForDriver(userId) {
         rr.allow_mid_trip_pickup,
         rr.departure_time,
         rr.created_at,
+        rr.route_geometry,
         rider.full_name as rider_name,
         rider.phone as rider_phone,
         rr.corridor_id
@@ -163,14 +195,10 @@ async function getIncomingRequestsForDriver(userId) {
             trip.corridor_id === request.corridor_id &&
             trip.available_seats >= request.seats_required
         )
-        .map((trip) => {
-          const overlap = overlapScore(request, trip);
-
-          return {
-            overlap,
-            trip,
-          };
-        })
+        .map((trip) => ({
+          overlap: overlapScore(request, trip),
+          trip,
+        }))
         .filter((candidate) => candidate.overlap.overlapRatio >= 0.35)
         .sort((left, right) => right.overlap.score - left.overlap.score);
 
@@ -244,7 +272,7 @@ async function updateDriverAvailability(userId, payload = {}) {
   const current = await getDriverRecord(userId);
 
   if (!current) {
-    throw new Error('Driver profile not found.');
+    throw buildStatusError('Driver profile not found.', 404);
   }
 
   const nextIsOnline =
@@ -266,6 +294,63 @@ async function updateDriverAvailability(userId, payload = {}) {
   );
 
   return getDriverDashboard(userId);
+}
+
+async function updateDriverLocation({ bookingId, latitude, longitude, userId }) {
+  const pool = db.getPool();
+
+  if (!pool || !userId) {
+    throw new Error('Database is required for driver location updates.');
+  }
+
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw buildStatusError('Valid latitude and longitude are required.', 400);
+  }
+
+  const result = await db.query(
+    `
+      select
+        b.id as booking_id,
+        at.id as active_trip_id,
+        driver_user.id as driver_user_id
+      from bookings b
+      join active_trips at on at.id = b.active_trip_id
+      join drivers d on d.id = at.driver_id
+      join users driver_user on driver_user.id = d.user_id
+      where driver_user.id = $1
+        and b.booking_status not in ('completed', 'cancelled')
+        ${bookingId ? 'and b.id = $2' : ''}
+      order by b.created_at desc
+      limit 1
+    `,
+    bookingId ? [userId, bookingId] : [userId]
+  );
+
+  const tripRow = result.rows[0];
+
+  if (!tripRow) {
+    throw buildStatusError('No active driver trip is available to update.', 404);
+  }
+
+  await db.query(
+    `
+      update active_trips
+      set
+        current_lat = $2,
+        current_lng = $3,
+        last_location_at = now()
+      where id = $1
+    `,
+    [tripRow.active_trip_id, lat, lng]
+  );
+
+  return getBookingById(tripRow.booking_id, {
+    userId,
+    userRole: 'driver',
+  });
 }
 
 async function acceptIncomingRequest({ requestId, userId }) {
@@ -296,7 +381,7 @@ async function acceptIncomingRequest({ requestId, userId }) {
     const driver = driverResult.rows[0];
 
     if (!driver) {
-      throw new Error('Driver profile not found.');
+      throw buildStatusError('Driver profile not found.', 404);
     }
 
     if (!driver.is_online) {
@@ -315,6 +400,7 @@ async function acceptIncomingRequest({ requestId, userId }) {
           rr.ride_type,
           rr.seats_required,
           rr.allow_mid_trip_pickup,
+          rr.route_geometry,
           rr.status
         from ride_requests rr
         where rr.id = $1
@@ -326,7 +412,7 @@ async function acceptIncomingRequest({ requestId, userId }) {
     const request = requestResult.rows[0];
 
     if (!request) {
-      throw new Error('Ride request not found.');
+      throw buildStatusError('Ride request not found.', 404);
     }
 
     if (request.status !== 'searching') {
@@ -343,7 +429,10 @@ async function acceptIncomingRequest({ requestId, userId }) {
 
       if (existingBooking.rows[0]?.id) {
         await client.query('commit');
-        return getBookingById(existingBooking.rows[0].id);
+        return getBookingById(existingBooking.rows[0].id, {
+          userId,
+          userRole: 'driver',
+        });
       }
 
       throw new Error('This rider request has already been assigned.');
@@ -359,6 +448,7 @@ async function acceptIncomingRequest({ requestId, userId }) {
           at.destination_label,
           at.origin_km,
           at.destination_km,
+          at.route_geometry,
           v.eta_minutes as vehicle_eta_minutes
         from active_trips at
         join vehicles v on v.id = at.vehicle_id
@@ -391,7 +481,7 @@ async function acceptIncomingRequest({ requestId, userId }) {
           status = case when available_seats - $2 <= 0 then 'full' else 'in_progress' end
         where id = $1
           and available_seats >= $2
-        returning id, base_solo_fare
+        returning id
       `,
       [bestCandidate.trip.id, request.seats_required]
     );
@@ -428,12 +518,7 @@ async function acceptIncomingRequest({ requestId, userId }) {
           values ($1, $2, $3, $4, 'dispatch', 'confirmed')
           returning id
         `,
-        [
-          request.id,
-          bestCandidate.trip.id,
-          fare.estimatedFare,
-          fare.estimatedSavings,
-        ]
+        [request.id, bestCandidate.trip.id, fare.estimatedFare, fare.estimatedSavings]
       );
 
       bookingId = bookingInsert.rows[0].id;
@@ -449,7 +534,10 @@ async function acceptIncomingRequest({ requestId, userId }) {
     );
 
     await client.query('commit');
-    return getBookingById(bookingId);
+    return getBookingById(bookingId, {
+      userId,
+      userRole: 'driver',
+    });
   } catch (error) {
     await client.query('rollback');
     throw error;
@@ -462,4 +550,5 @@ module.exports = {
   acceptIncomingRequest,
   getDriverDashboard,
   updateDriverAvailability,
+  updateDriverLocation,
 };
