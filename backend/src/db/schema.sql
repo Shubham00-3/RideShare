@@ -106,6 +106,113 @@ create table if not exists bookings (
   created_at timestamptz not null default now()
 );
 
+create table if not exists saved_places (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  label text not null,
+  address text not null,
+  latitude numeric(10,6),
+  longitude numeric(10,6),
+  is_default boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists emergency_contacts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  name text not null,
+  phone text not null,
+  relationship text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists notification_preferences (
+  user_id uuid primary key references users(id) on delete cascade,
+  push_enabled boolean not null default true,
+  trip_updates_enabled boolean not null default true,
+  safety_alerts_enabled boolean not null default true,
+  marketing_enabled boolean not null default false,
+  sms_enabled boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists device_push_tokens (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  expo_push_token text not null unique,
+  platform text,
+  device_label text,
+  last_seen_at timestamptz not null default now(),
+  revoked_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists trip_ratings (
+  id uuid primary key default gen_random_uuid(),
+  booking_id uuid not null references bookings(id) on delete cascade,
+  rater_user_id uuid not null references users(id) on delete cascade,
+  subject_user_id uuid not null references users(id) on delete cascade,
+  score integer not null check (score between 1 and 5),
+  comment text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (booking_id, rater_user_id)
+);
+
+create table if not exists support_tickets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  booking_id uuid references bookings(id) on delete set null,
+  category text not null default 'general',
+  priority text not null default 'normal',
+  status text not null default 'open',
+  message text not null,
+  resolution_notes text,
+  assigned_admin_id uuid references users(id) on delete set null,
+  resolved_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists sos_incidents (
+  id uuid primary key default gen_random_uuid(),
+  booking_id uuid references bookings(id) on delete set null,
+  user_id uuid not null references users(id) on delete cascade,
+  support_ticket_id uuid references support_tickets(id) on delete set null,
+  status text not null default 'open',
+  summary text,
+  latitude numeric(10,6),
+  longitude numeric(10,6),
+  emergency_contacts_snapshot jsonb not null default '[]'::jsonb,
+  resolution_notes text,
+  resolved_by_admin_id uuid references users(id) on delete set null,
+  resolved_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists booking_share_tokens (
+  id uuid primary key default gen_random_uuid(),
+  booking_id uuid not null references bookings(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists auth_rate_limits (
+  action text not null,
+  subject text not null,
+  attempt_count integer not null default 0,
+  window_started_at timestamptz not null default now(),
+  blocked_until timestamptz,
+  last_attempt_at timestamptz not null default now(),
+  primary key (action, subject)
+);
+
 create table if not exists auth_otps (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
@@ -147,3 +254,13 @@ alter table ride_requests
   add column if not exists route_distance_meters integer,
   add column if not exists route_duration_seconds integer,
   add column if not exists route_geometry jsonb;
+
+create index if not exists idx_saved_places_user on saved_places(user_id);
+create index if not exists idx_emergency_contacts_user on emergency_contacts(user_id);
+create index if not exists idx_device_push_tokens_user on device_push_tokens(user_id)
+  where revoked_at is null;
+create index if not exists idx_trip_ratings_subject on trip_ratings(subject_user_id);
+create index if not exists idx_support_tickets_user on support_tickets(user_id);
+create index if not exists idx_support_tickets_status on support_tickets(status);
+create index if not exists idx_sos_incidents_user on sos_incidents(user_id);
+create index if not exists idx_sos_incidents_status on sos_incidents(status);

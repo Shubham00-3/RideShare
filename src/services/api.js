@@ -42,6 +42,7 @@ function buildReachabilityHint(baseUrl) {
 const API_BASE_URL = resolveApiBaseUrl();
 
 export const hasApiBaseUrl = Boolean(API_BASE_URL);
+export const apiBaseUrl = API_BASE_URL;
 
 async function requestJson(path, options = {}) {
   const { authToken, body, method = 'POST' } = options;
@@ -337,6 +338,250 @@ export async function updateDriverLocation(payload, authToken) {
   }
 
   return requestJson('/api/driver/me/location', {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function fetchProfile(authToken) {
+  if (!API_BASE_URL) {
+    throw new Error('API base URL is not configured.');
+  }
+
+  return requestJson('/api/me/profile', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function updateProfile(payload, authToken) {
+  return requestJson('/api/me/profile', {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function fetchSavedPlaces(authToken) {
+  return requestJson('/api/me/saved-places', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function createSavedPlace(payload, authToken) {
+  return requestJson('/api/me/saved-places', {
+    authToken,
+    body: payload,
+    method: 'POST',
+  });
+}
+
+export async function updateSavedPlace(placeId, payload, authToken) {
+  return requestJson(`/api/me/saved-places/${placeId}`, {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function deleteSavedPlace(placeId, authToken) {
+  return requestJson(`/api/me/saved-places/${placeId}`, {
+    authToken,
+    method: 'DELETE',
+  });
+}
+
+export async function fetchEmergencyContacts(authToken) {
+  return requestJson('/api/me/emergency-contacts', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function createEmergencyContact(payload, authToken) {
+  return requestJson('/api/me/emergency-contacts', {
+    authToken,
+    body: payload,
+    method: 'POST',
+  });
+}
+
+export async function updateEmergencyContact(contactId, payload, authToken) {
+  return requestJson(`/api/me/emergency-contacts/${contactId}`, {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function deleteEmergencyContact(contactId, authToken) {
+  return requestJson(`/api/me/emergency-contacts/${contactId}`, {
+    authToken,
+    method: 'DELETE',
+  });
+}
+
+export async function fetchNotificationPreferences(authToken) {
+  return requestJson('/api/me/notification-preferences', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function updateNotificationPreferences(payload, authToken) {
+  return requestJson('/api/me/notification-preferences', {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function registerPushToken(payload, authToken) {
+  return requestJson('/api/me/push-tokens', {
+    authToken,
+    body: payload,
+    method: 'POST',
+  });
+}
+
+export async function deletePushToken(expoPushToken, authToken) {
+  return requestJson(`/api/me/push-tokens/${encodeURIComponent(expoPushToken)}`, {
+    authToken,
+    method: 'DELETE',
+  });
+}
+
+export async function shareBooking(bookingId, authToken) {
+  return requestJson(`/api/bookings/${bookingId}/share`, {
+    authToken,
+    method: 'POST',
+  });
+}
+
+export async function triggerBookingSos(bookingId, payload, authToken) {
+  return requestJson(`/api/bookings/${bookingId}/sos`, {
+    authToken,
+    body: payload,
+    method: 'POST',
+  });
+}
+
+export async function createSupportTicket(payload, authToken) {
+  return requestJson('/api/support/tickets', {
+    authToken,
+    body: payload,
+    method: 'POST',
+  });
+}
+
+export async function fetchMySupportTickets(authToken) {
+  return requestJson('/api/me/support-tickets', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function submitBookingRating(bookingId, payload, authToken) {
+  return requestJson(`/api/bookings/${bookingId}/rating`, {
+    authToken,
+    body: payload,
+    method: 'POST',
+  });
+}
+
+export async function fetchMyRatings(authToken) {
+  return requestJson('/api/me/ratings', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function rescheduleRideBooking(bookingId, departureTime, authToken) {
+  return requestJson(`/api/bookings/${bookingId}/schedule`, {
+    authToken,
+    body: {
+      departureTime,
+    },
+    method: 'PATCH',
+  });
+}
+
+export async function fetchAdminOverview(authToken) {
+  return requestJson('/api/admin/overview', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function fetchAdminUsers(authToken, query = '') {
+  const params = new URLSearchParams();
+
+  if (query) {
+    params.set('q', query);
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+
+  return requestJson(`/api/admin/users${suffix}`, {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function fetchAdminBookings(authToken, filters = {}) {
+  const params = new URLSearchParams();
+
+  if (filters.q) {
+    params.set('q', filters.q);
+  }
+
+  if (filters.status) {
+    params.set('status', filters.status);
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+
+  return requestJson(`/api/admin/bookings${suffix}`, {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function fetchAdminIncidents(authToken, filters = {}) {
+  const params = new URLSearchParams();
+
+  if (filters.status) {
+    params.set('status', filters.status);
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+
+  return requestJson(`/api/admin/incidents${suffix}`, {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function updateAdminBooking(bookingId, payload, authToken) {
+  return requestJson(`/api/admin/bookings/${bookingId}`, {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function updateAdminIncident(incidentId, payload, authToken) {
+  return requestJson(`/api/admin/incidents/${incidentId}`, {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function updateAdminDriver(driverUserId, payload, authToken) {
+  return requestJson(`/api/admin/drivers/${driverUserId}`, {
     authToken,
     body: payload,
     method: 'PATCH',

@@ -3,6 +3,7 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -17,18 +18,24 @@ import {
   MessageCircle,
   Navigation,
   Phone,
+  Share2,
   Star,
   Users,
   X,
 } from 'lucide-react-native';
 import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
 import { useRide } from '../context/RideContext';
+import { useRealtime } from '../context/RealtimeContext';
+import { useAuth } from '../context/AuthContext';
 import RouteMap from '../components/RouteMap';
+import { shareBooking } from '../services/api';
 
 const { height } = Dimensions.get('window');
 const LIVE_REFRESH_MS = 5000;
 
 export default function ActiveTripScreen({ navigation }) {
+  const { token } = useAuth();
+  const { isConnected, watchBooking, watchTrip } = useRealtime();
   const {
     activeBookingId,
     activeBookingSource,
@@ -45,6 +52,20 @@ export default function ActiveTripScreen({ navigation }) {
   const activeOfferKey = activeTrip?.midTripOffer
     ? `${activeTrip.id}:${activeTrip.midTripOffer.title}`
     : null;
+
+  useEffect(() => {
+    if (!activeBookingId) {
+      return undefined;
+    }
+
+    const unwatchBooking = watchBooking(activeBookingId);
+    const unwatchTrip = activeTrip?.id ? watchTrip(activeTrip.id) : () => {};
+
+    return () => {
+      unwatchBooking();
+      unwatchTrip();
+    };
+  }, [activeBookingId, activeTrip?.id, watchBooking, watchTrip]);
 
   useEffect(() => {
     if (!isBackendBackedTrip) {
@@ -132,12 +153,27 @@ export default function ActiveTripScreen({ navigation }) {
     activeTrip.phaseLabel ||
     (activeTrip.status === 'completed' ? 'Trip completed' : 'Trip in progress');
   const liveUpdateText = isBackendBackedTrip
-    ? `Live updates every ${LIVE_REFRESH_MS / 1000}s`
+    ? isConnected
+      ? 'Realtime connected with polling fallback'
+      : `Polling every ${LIVE_REFRESH_MS / 1000}s`
     : 'Demo trip simulation';
   const progressText = isScheduledRide
     ? `${etaLeft} min until pickup window`
     : `${Math.round(tripProgress * 100)}% complete`;
   const canCancelRide = !['completed', 'cancelled'].includes(String(activeTrip.status || '').toLowerCase());
+
+  const handleShare = async () => {
+    try {
+      const payload = await shareBooking(activeBookingId, token);
+      await Share.share({
+        message: `Track my RideShare trip live: ${payload.shareUrl}`,
+        title: 'RideShare live trip',
+        url: payload.shareUrl,
+      });
+    } catch (error) {
+      Alert.alert('Share unavailable', error.message || 'Unable to create the share link right now.');
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -163,18 +199,6 @@ export default function ActiveTripScreen({ navigation }) {
             <Clock size={14} color={COLORS.primary} />
             <Text style={styles.etaText}>{etaLeft} min</Text>
           </View>
-        </View>
-
-        <View style={styles.mapControls}>
-          <TouchableOpacity style={styles.controlBtn}>
-            <Text style={styles.controlText}>+</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.controlBtn}>
-            <Text style={styles.controlText}>-</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.controlBtn, { marginTop: 8 }]}>
-            <Navigation size={16} color={COLORS.primary} />
-          </TouchableOpacity>
         </View>
       </View>
 
@@ -222,9 +246,9 @@ export default function ActiveTripScreen({ navigation }) {
         </View>
 
         <View style={styles.driverCard}>
-          <View style={styles.driverAvatar}>
+          <Animated.View style={[styles.driverAvatar, { transform: [{ scale: pulseAnim }] }]}>
             <Text style={styles.driverAvatarText}>{activeTrip.driver.name.charAt(0)}</Text>
-          </View>
+          </Animated.View>
           <View style={styles.driverInfo}>
             <Text style={styles.driverName}>{activeTrip.driver.name}</Text>
             <View style={styles.driverMeta}>
@@ -233,7 +257,7 @@ export default function ActiveTripScreen({ navigation }) {
               <Text style={styles.driverTrips}>| {activeTrip.driver.trips} trips</Text>
             </View>
             {activeTrip.driver.phone ? (
-              <Text style={styles.driverPhone}>Test driver login: {activeTrip.driver.phone.replace('+91', '')}</Text>
+              <Text style={styles.driverPhone}>{activeTrip.driver.phone}</Text>
             ) : null}
           </View>
           <View style={styles.plateNumber}>
@@ -256,10 +280,29 @@ export default function ActiveTripScreen({ navigation }) {
           </View>
         </View>
 
-        <View style={styles.earningsCard}>
-          <Text style={styles.earningsTitle}>Current trip economics</Text>
-          <Text style={styles.earningsLine}>Fare paid: Rs. {activeTrip.fareTotal}</Text>
-          <Text style={styles.earningsLine}>Savings unlocked: Rs. {activeTrip.fareSavings}</Text>
+        <View style={styles.actionsRow}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
+            <Share2 size={16} color={COLORS.primary} />
+            <Text style={styles.actionButtonText}>Share</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('Support', { bookingId: activeBookingId })}
+          >
+            <MessageCircle size={16} color={COLORS.accent} />
+            <Text style={styles.actionButtonText}>Support</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('SOS', { bookingId: activeBookingId })}
+          >
+            <AlertTriangle size={16} color={COLORS.error} />
+            <Text style={styles.actionButtonText}>SOS</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton}>
+            <Phone size={16} color={COLORS.success} />
+            <Text style={styles.actionButtonText}>Call</Text>
+          </TouchableOpacity>
         </View>
 
         {canCancelRide ? (
@@ -269,7 +312,7 @@ export default function ActiveTripScreen({ navigation }) {
             onPress={() => {
               Alert.alert(
                 'Cancel this ride?',
-                'This will cancel the trip for you and update the booking status immediately.',
+                'This will cancel the booking and release the reserved seat.',
                 [
                   { text: 'Keep ride', style: 'cancel' },
                   {
@@ -278,12 +321,9 @@ export default function ActiveTripScreen({ navigation }) {
                     onPress: async () => {
                       try {
                         await cancelBooking(activeBookingId);
-                        navigation.navigate('MainTabs');
-                      } catch (cancelError) {
-                        Alert.alert(
-                          'Cancellation unavailable',
-                          cancelError.message || 'We could not cancel the ride right now.'
-                        );
+                        navigation.goBack();
+                      } catch (error) {
+                        Alert.alert('Unable to cancel', error.message || 'Try again shortly.');
                       }
                     },
                   },
@@ -291,85 +331,31 @@ export default function ActiveTripScreen({ navigation }) {
               );
             }}
           >
-            <Text style={styles.cancelButtonText}>
-              {loading ? 'Cancelling...' : 'Cancel ride'}
-            </Text>
+            <Text style={styles.cancelButtonText}>{loading ? 'Cancelling...' : 'Cancel ride'}</Text>
           </TouchableOpacity>
         ) : null}
-
-        <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Phone size={20} color={COLORS.primary} />
-            <Text style={styles.actionBtnText}>Call</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <MessageCircle size={20} color={COLORS.primary} />
-            <Text style={styles.actionBtnText}>Chat</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtn}>
-            <Navigation size={20} color={COLORS.primary} />
-            <Text style={styles.actionBtnText}>Share</Text>
-          </TouchableOpacity>
-          <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-            <TouchableOpacity style={styles.sosButton} onPress={() => navigation.navigate('SOS')}>
-              <AlertTriangle size={20} color={COLORS.textInverse} />
-              <Text style={styles.sosText}>SOS</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  emptyTitle: {
-    color: COLORS.textPrimary,
-    fontSize: SIZES.xxl,
-    ...FONTS.bold,
-  },
-  emptySubtitle: {
-    color: COLORS.textSecondary,
-    marginTop: 10,
-    textAlign: 'center',
-    lineHeight: 22,
-    ...FONTS.regular,
-  },
-  mapArea: {
-    flex: 1,
-    position: 'relative',
-  },
-  mapPlaceholder: {
-    flex: 1,
-    backgroundColor: '#E8ECF0',
-    position: 'relative',
-    overflow: 'hidden',
-  },
+  container: { flex: 1, backgroundColor: COLORS.background },
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+  emptyTitle: { color: COLORS.textPrimary, fontSize: SIZES.xxl, ...FONTS.bold },
+  emptySubtitle: { color: COLORS.textSecondary, marginTop: 10, textAlign: 'center', ...FONTS.regular },
+  mapArea: { height: height * 0.42, position: 'relative' },
+  mapPlaceholder: { flex: 1 },
   routePath: {
     position: 'absolute',
-    top: '47%',
-    left: '15%',
-    width: '70%',
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.5)',
-    overflow: 'hidden',
+    left: 24,
+    right: 24,
+    bottom: 18,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.4)',
   },
-  routeFilled: {
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: COLORS.primary,
-  },
+  routeFilled: { height: 6, borderRadius: 3, backgroundColor: COLORS.primary },
   topControls: {
     position: 'absolute',
     top: 56,
@@ -380,284 +366,153 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   controlBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
     ...SHADOWS.small,
   },
   etaBadge: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
     backgroundColor: 'rgba(255,255,255,0.94)',
-    borderRadius: 20,
-    paddingHorizontal: 12,
+    borderRadius: SIZES.radius_full,
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  etaText: {
-    color: COLORS.textPrimary,
-    ...FONTS.semiBold,
-  },
-  controlText: {
-    color: COLORS.textPrimary,
-    fontSize: 18,
-    ...FONTS.bold,
-  },
-  mapControls: {
-    position: 'absolute',
-    right: 16,
-    bottom: 120,
-  },
+  etaText: { color: COLORS.textPrimary, ...FONTS.semiBold },
   midTripAlert: {
-    position: 'absolute',
-    top: 120,
-    left: 16,
-    right: 16,
+    alignItems: 'center',
     backgroundColor: COLORS.surface,
     borderRadius: SIZES.radius_xl,
-    padding: 14,
     flexDirection: 'row',
-    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 16,
+    marginTop: -28,
+    padding: 14,
     ...SHADOWS.medium,
   },
   alertIcon: {
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: COLORS.success,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    backgroundColor: COLORS.primary,
   },
-  alertContent: {
-    flex: 1,
-  },
-  alertTitle: {
-    color: COLORS.textPrimary,
-    ...FONTS.semiBold,
-  },
-  alertSubtitle: {
-    color: COLORS.textSecondary,
-    marginTop: 3,
-    ...FONTS.regular,
-  },
+  alertContent: { flex: 1 },
+  alertTitle: { color: COLORS.textPrimary, ...FONTS.semiBold },
+  alertSubtitle: { color: COLORS.textSecondary, marginTop: 2, ...FONTS.regular },
   bottomSheet: {
-    minHeight: height * 0.4,
+    flex: 1,
     backgroundColor: COLORS.surface,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    paddingBottom: 20,
-    ...SHADOWS.large,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    marginTop: 10,
+    padding: 20,
   },
   sheetHandle: {
     width: 42,
     height: 5,
-    borderRadius: 999,
+    borderRadius: 3,
     backgroundColor: COLORS.border,
     alignSelf: 'center',
-    marginBottom: 14,
-  },
-  progressContainer: {
     marginBottom: 16,
   },
+  progressContainer: { marginBottom: 16 },
   progressBar: {
     height: 8,
-    borderRadius: 999,
     backgroundColor: COLORS.borderLight,
+    borderRadius: 999,
   },
   progressFill: {
     height: 8,
-    borderRadius: 999,
     backgroundColor: COLORS.primary,
+    borderRadius: 999,
   },
   progressText: {
     color: COLORS.textSecondary,
     marginTop: 8,
     ...FONTS.medium,
   },
-  tripHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  tripTitle: {
-    color: COLORS.textPrimary,
-    fontSize: SIZES.xxl,
-    ...FONTS.bold,
-  },
-  tripSubtitle: {
-    color: COLORS.textSecondary,
-    marginTop: 4,
-    ...FONTS.regular,
-  },
+  tripHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  tripTitle: { color: COLORS.textPrimary, fontSize: SIZES.xl, ...FONTS.bold },
+  tripSubtitle: { color: COLORS.textSecondary, marginTop: 4, ...FONTS.regular },
   rideBadge: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-    backgroundColor: `${COLORS.success}16`,
-  },
-  rideType: {
-    color: COLORS.success,
-    ...FONTS.semiBold,
-  },
-  driverCard: {
+    backgroundColor: COLORS.success + '15',
+    borderRadius: SIZES.radius_full,
     flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  rideType: { color: COLORS.success, fontSize: SIZES.xs, ...FONTS.semiBold },
+  driverCard: {
     alignItems: 'center',
     backgroundColor: COLORS.background,
     borderRadius: SIZES.radius_xl,
-    padding: 14,
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+    padding: 16,
   },
   driverAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: `${COLORS.primary}16`,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: COLORS.primary + '18',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
-  driverAvatarText: {
-    color: COLORS.primary,
-    fontSize: SIZES.lg,
-    ...FONTS.bold,
-  },
-  driverInfo: {
-    flex: 1,
-  },
-  driverName: {
-    color: COLORS.textPrimary,
-    ...FONTS.semiBold,
-  },
-  driverMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 4,
-  },
-  driverRating: {
-    color: COLORS.textSecondary,
-    ...FONTS.medium,
-  },
-  driverTrips: {
-    color: COLORS.textTertiary,
-    ...FONTS.medium,
-  },
-  driverPhone: {
-    color: COLORS.primary,
-    marginTop: 6,
-    ...FONTS.semiBold,
-  },
+  driverAvatarText: { color: COLORS.primary, fontSize: SIZES.lg, ...FONTS.bold },
+  driverInfo: { flex: 1 },
+  driverName: { color: COLORS.textPrimary, ...FONTS.semiBold },
+  driverMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5 },
+  driverRating: { color: COLORS.textSecondary, ...FONTS.medium },
+  driverTrips: { color: COLORS.textTertiary, ...FONTS.regular },
+  driverPhone: { color: COLORS.textSecondary, marginTop: 6, ...FONTS.regular },
   plateNumber: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    borderRadius: SIZES.radius_lg,
-    backgroundColor: COLORS.surface,
   },
-  plateText: {
-    color: COLORS.textPrimary,
-    ...FONTS.semiBold,
-  },
-  vehicleRoute: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
-  },
+  plateText: { color: COLORS.textPrimary, ...FONTS.semiBold },
+  vehicleRoute: { gap: 10, marginTop: 16 },
   vehicleBadge: {
-    flex: 1,
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F8FAFF',
-    borderRadius: SIZES.radius_lg,
-    padding: 12,
-  },
-  vehicleText: {
-    color: COLORS.textPrimary,
-    ...FONTS.medium,
-  },
-  routeInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F5FFF8',
-    borderRadius: SIZES.radius_lg,
-    padding: 12,
-  },
-  routeText: {
-    color: COLORS.textPrimary,
-    ...FONTS.medium,
-  },
-  earningsCard: {
-    marginTop: 14,
     backgroundColor: COLORS.background,
-    borderRadius: SIZES.radius_xl,
-    padding: 14,
+    borderRadius: SIZES.radius_full,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-  earningsTitle: {
-    color: COLORS.textPrimary,
-    marginBottom: 8,
-    ...FONTS.semiBold,
+  vehicleText: { color: COLORS.textPrimary, ...FONTS.medium },
+  routeInfo: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  routeText: { color: COLORS.textSecondary, flex: 1, ...FONTS.regular },
+  actionsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 18 },
+  actionButton: {
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radius_lg,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
-  earningsLine: {
-    color: COLORS.textSecondary,
-    marginTop: 2,
-    ...FONTS.medium,
-  },
+  actionButtonText: { color: COLORS.textPrimary, ...FONTS.medium },
   cancelButton: {
-    marginTop: 14,
+    alignItems: 'center',
+    borderColor: COLORS.error + '40',
     borderRadius: SIZES.radius_lg,
     borderWidth: 1,
-    borderColor: COLORS.error,
+    marginTop: 18,
     paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.surface,
   },
-  cancelButtonText: {
-    color: COLORS.error,
-    ...FONTS.semiBold,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 16,
-  },
-  actionBtn: {
-    width: 74,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: SIZES.radius_lg,
-    backgroundColor: COLORS.background,
-    paddingVertical: 12,
-    gap: 6,
-  },
-  actionBtnText: {
-    color: COLORS.textPrimary,
-    fontSize: SIZES.xs,
-    ...FONTS.medium,
-  },
-  sosButton: {
-    width: 74,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: SIZES.radius_lg,
-    backgroundColor: COLORS.error,
-    paddingVertical: 12,
-    gap: 6,
-  },
-  sosText: {
-    color: COLORS.textInverse,
-    fontSize: SIZES.xs,
-    ...FONTS.semiBold,
-  },
+  cancelButtonText: { color: COLORS.error, ...FONTS.semiBold },
 });

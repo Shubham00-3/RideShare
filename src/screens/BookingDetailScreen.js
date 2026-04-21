@@ -1,19 +1,23 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 import {
+  AlertTriangle,
   ArrowLeft,
   Car,
   Clock,
   MapPin,
+  MessageSquare,
   Navigation,
   Receipt,
+  Share2,
   Shield,
   Star,
   Users,
@@ -21,6 +25,13 @@ import {
 import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
 import RouteMap from '../components/RouteMap';
 import { useRide } from '../context/RideContext';
+import { useAuth } from '../context/AuthContext';
+import { useRealtime } from '../context/RealtimeContext';
+import {
+  rescheduleRideBooking,
+  shareBooking,
+  submitBookingRating,
+} from '../services/api';
 
 function formatStatus(status) {
   const normalized = String(status || 'confirmed').replace(/_/g, ' ');
@@ -28,8 +39,11 @@ function formatStatus(status) {
 }
 
 export default function BookingDetailScreen({ navigation, route }) {
-  const { activeBookingId, cancelBooking, loading } = useRide();
+  const { token } = useAuth();
+  const { watchBooking } = useRealtime();
+  const { activeBookingId, cancelBooking, loading, refreshActiveBooking } = useRide();
   const [booking, setBooking] = useState(route.params?.booking || null);
+  const [ratingScore, setRatingScore] = useState(route.params?.booking?.trip?.rating?.score || 5);
   const trip = booking?.trip;
   const createdAt = booking?.createdAt ? new Date(booking.createdAt) : null;
   const isActiveBooking =
@@ -37,10 +51,24 @@ export default function BookingDetailScreen({ navigation, route }) {
     activeBookingId === booking.bookingId &&
     !['completed', 'cancelled'].includes(String(booking.status || ''));
   const isCancellable = !['completed', 'cancelled'].includes(String(booking?.status || '').toLowerCase());
+  const isScheduledRide = String(trip?.status || '') === 'scheduled';
 
   useEffect(() => {
     setBooking(route.params?.booking || null);
   }, [route.params?.booking]);
+
+  useEffect(() => {
+    if (!booking?.bookingId) {
+      return undefined;
+    }
+
+    return watchBooking(booking.bookingId);
+  }, [booking?.bookingId, watchBooking]);
+
+  const canRate = useMemo(
+    () => String(booking?.status || '').toLowerCase() === 'completed' && !trip?.rating,
+    [booking?.status, trip?.rating]
+  );
 
   if (!booking || !trip) {
     return (
@@ -52,6 +80,48 @@ export default function BookingDetailScreen({ navigation, route }) {
       </View>
     );
   }
+
+  const handleShare = async () => {
+    try {
+      const payload = await shareBooking(booking.bookingId, token);
+      await Share.share({
+        message: `Track my RideShare trip: ${payload.shareUrl}`,
+        title: 'RideShare trip link',
+        url: payload.shareUrl,
+      });
+    } catch (error) {
+      Alert.alert('Share unavailable', error.message || 'Unable to create a share link right now.');
+    }
+  };
+
+  const handleReschedule = async () => {
+    const nextDeparture = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+    try {
+      const nextBooking = await rescheduleRideBooking(booking.bookingId, nextDeparture, token);
+      setBooking(nextBooking);
+      Alert.alert('Ride rescheduled', 'Your pickup window has been moved by 30 minutes.');
+    } catch (error) {
+      Alert.alert('Unable to reschedule', error.message || 'Try again shortly.');
+    }
+  };
+
+  const handleRating = async () => {
+    try {
+      const nextBooking = await submitBookingRating(
+        booking.bookingId,
+        {
+          score: ratingScore,
+          comment: `Rated ${ratingScore} stars from mobile app.`,
+        },
+        token
+      );
+      setBooking(nextBooking);
+      Alert.alert('Thanks for rating', 'Your feedback has been saved.');
+    } catch (error) {
+      Alert.alert('Unable to save rating', error.message || 'Try again shortly.');
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -109,6 +179,27 @@ export default function BookingDetailScreen({ navigation, route }) {
           </View>
         </View>
 
+        <View style={styles.actionRow}>
+          <TouchableOpacity style={styles.actionCard} onPress={handleShare}>
+            <Share2 size={16} color={COLORS.primary} />
+            <Text style={styles.actionText}>Share trip</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => navigation.navigate('Support', { bookingId: booking.bookingId })}
+          >
+            <MessageSquare size={16} color={COLORS.accent} />
+            <Text style={styles.actionText}>Support</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => navigation.navigate('SOS', { bookingId: booking.bookingId })}
+          >
+            <AlertTriangle size={16} color={COLORS.error} />
+            <Text style={styles.actionText}>SOS</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Route</Text>
           <View style={styles.routeRow}>
@@ -157,7 +248,7 @@ export default function BookingDetailScreen({ navigation, route }) {
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Fare details</Text>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Total paid</Text>
+            <Text style={styles.summaryLabel}>Total fare</Text>
             <Text style={styles.summaryValue}>Rs {trip.fareTotal || 0}</Text>
           </View>
           <View style={styles.summaryRow}>
@@ -184,16 +275,54 @@ export default function BookingDetailScreen({ navigation, route }) {
             <View style={styles.supportIcon}>
               <Shield size={16} color={COLORS.success} />
             </View>
-            <Text style={styles.supportText}>Booking tracked in your account history</Text>
+            <Text style={styles.supportText}>Live trip sharing and SOS are available from this booking</Text>
           </View>
         </View>
+
+        {canRate ? (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Rate this trip</Text>
+            <View style={styles.ratingActionRow}>
+              {[1, 2, 3, 4, 5].map((value) => (
+                <TouchableOpacity key={value} onPress={() => setRatingScore(value)}>
+                  <Star
+                    size={26}
+                    color={COLORS.star}
+                    fill={value <= ratingScore ? COLORS.star : 'transparent'}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity style={styles.primaryButton} onPress={handleRating}>
+              <Text style={styles.primaryButtonText}>Save rating</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {trip.rating ? (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Your rating</Text>
+            <Text style={styles.supportText}>{trip.rating.score} stars</Text>
+          </View>
+        ) : null}
 
         {isActiveBooking ? (
           <TouchableOpacity
             style={styles.primaryButton}
-            onPress={() => navigation.navigate('ActiveTrip')}
+            onPress={async () => {
+              if (booking.bookingId === activeBookingId) {
+                await refreshActiveBooking(booking.bookingId).catch(() => {});
+              }
+              navigation.navigate('ActiveTrip');
+            }}
           >
             <Text style={styles.primaryButtonText}>Open live trip</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {isScheduledRide && isCancellable ? (
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleReschedule}>
+            <Text style={styles.secondaryButtonText}>Delay pickup by 30 minutes</Text>
           </TouchableOpacity>
         ) : null}
 
@@ -320,27 +449,45 @@ const styles = StyleSheet.create({
   },
   heroSubtitle: {
     color: COLORS.textSecondary,
-    marginTop: 6,
+    marginTop: 4,
     ...FONTS.regular,
   },
   heroMetaRow: {
     flexDirection: 'row',
+    gap: 8,
     flexWrap: 'wrap',
-    gap: 10,
     marginTop: 14,
   },
   heroMetaChip: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    backgroundColor: COLORS.background,
     borderRadius: SIZES.radius_full,
-    backgroundColor: '#F4F8FF',
+    flexDirection: 'row',
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   heroMetaText: {
     color: COLORS.textPrimary,
     ...FONTS.medium,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionCard: {
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: SIZES.radius_xl,
+    flex: 1,
+    gap: 8,
+    paddingVertical: 16,
+    ...SHADOWS.small,
+  },
+  actionText: {
+    color: COLORS.textPrimary,
+    fontSize: SIZES.sm,
+    ...FONTS.semiBold,
   },
   sectionCard: {
     backgroundColor: COLORS.surface,
@@ -350,7 +497,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: COLORS.textPrimary,
-    marginBottom: 14,
+    fontSize: SIZES.lg,
+    marginBottom: 12,
     ...FONTS.semiBold,
   },
   routeRow: {
@@ -359,29 +507,29 @@ const styles = StyleSheet.create({
   },
   routeDots: {
     alignItems: 'center',
-    paddingTop: 5,
+    paddingTop: 4,
   },
   greenDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: COLORS.success,
-  },
-  redDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: COLORS.error,
   },
   routeLine: {
     width: 2,
-    height: 20,
-    backgroundColor: COLORS.border,
+    height: 34,
+    backgroundColor: COLORS.borderLight,
     marginVertical: 4,
+  },
+  redDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.error,
   },
   routeLabels: {
     flex: 1,
-    gap: 14,
+    gap: 18,
   },
   routeLabel: {
     color: COLORS.textPrimary,
@@ -390,38 +538,30 @@ const styles = StyleSheet.create({
   driverRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
   },
   driverAvatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: `${COLORS.primary}16`,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: COLORS.primary + '15',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
   driverAvatarText: {
     color: COLORS.primary,
     fontSize: SIZES.lg,
     ...FONTS.bold,
   },
-  driverInfo: {
-    flex: 1,
-  },
-  driverName: {
-    color: COLORS.textPrimary,
-    ...FONTS.semiBold,
-  },
+  driverInfo: { flex: 1 },
+  driverName: { color: COLORS.textPrimary, ...FONTS.semiBold },
   ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginTop: 4,
+    gap: 6,
+    marginTop: 5,
   },
-  driverMetaText: {
-    color: COLORS.textSecondary,
-    ...FONTS.medium,
-  },
+  driverMetaText: { color: COLORS.textSecondary, ...FONTS.regular },
   vehicleRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -429,80 +569,57 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   infoPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: SIZES.radius_full,
     backgroundColor: COLORS.background,
+    borderRadius: SIZES.radius_full,
+    flexDirection: 'row',
+    gap: 8,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
-  infoPillText: {
-    color: COLORS.textPrimary,
-    ...FONTS.medium,
-  },
+  infoPillText: { color: COLORS.textPrimary, ...FONTS.medium },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+    marginTop: 10,
   },
-  summaryLabel: {
-    color: COLORS.textSecondary,
-    ...FONTS.regular,
-  },
-  summaryValue: {
-    color: COLORS.textPrimary,
-    ...FONTS.semiBold,
-  },
-  summaryCode: {
-    color: COLORS.textPrimary,
-    fontSize: SIZES.sm,
-    ...FONTS.medium,
-  },
+  summaryLabel: { color: COLORS.textSecondary, ...FONTS.regular },
+  summaryValue: { color: COLORS.textPrimary, ...FONTS.semiBold },
+  summaryCode: { color: COLORS.textPrimary, fontSize: SIZES.xs, ...FONTS.bold },
   supportRow: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 12,
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 10,
   },
   supportIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.background,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: COLORS.background,
   },
-  supportText: {
-    flex: 1,
-    color: COLORS.textSecondary,
-    ...FONTS.medium,
+  supportText: { color: COLORS.textSecondary, flex: 1, ...FONTS.regular },
+  ratingActionRow: {
+    flexDirection: 'row',
+    gap: 10,
   },
   primaryButton: {
+    alignItems: 'center',
     backgroundColor: COLORS.primary,
     borderRadius: SIZES.radius_lg,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
+    paddingVertical: 14,
   },
-  primaryButtonText: {
-    color: COLORS.textInverse,
-    ...FONTS.semiBold,
-  },
+  primaryButtonText: { color: COLORS.textInverse, ...FONTS.semiBold },
   secondaryButton: {
+    alignItems: 'center',
+    borderColor: COLORS.primary + '35',
     borderRadius: SIZES.radius_lg,
     borderWidth: 1,
-    borderColor: COLORS.error,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
-    backgroundColor: COLORS.surface,
+    paddingVertical: 14,
   },
   secondaryButtonText: {
-    color: COLORS.error,
+    color: COLORS.primary,
     ...FONTS.semiBold,
   },
 });

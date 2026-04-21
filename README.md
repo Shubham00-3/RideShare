@@ -24,15 +24,16 @@ What is already working:
 - driver dashboard with trip controls, request acceptance, and live location updates
 - map autocomplete and route preview through backend mapping services
 - route-aware matching when request and trip geometry are available
-- active trip polling backed by persisted trip state
+- active trip sockets with polling fallback
+- backend-backed profile, saved places, emergency contacts, support, SOS, ratings, and admin tools
 - native Android development build support
 
 What is still not fully production-ready:
 
 - real SMS OTP delivery depends on Twilio Verify configuration
 - payment processing is still UI-only
-- realtime transport is still polling-based, not websocket-based
 - automated coverage is now in place for the backend, but is still not exhaustive
+- deployed sharing/push requires `PUBLIC_APP_URL` and `EXPO_PROJECT_ID`
 
 ## Core product idea
 
@@ -470,7 +471,6 @@ These are the main gaps still remaining before production:
 
 - real SMS OTP delivery
 - payment gateway integration
-- websocket-based realtime updates
 - broader automated coverage beyond the current backend suite
 - deployment and ops setup
 

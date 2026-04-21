@@ -1,11 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
+  deletePushToken,
   fetchSession,
   hasApiBaseUrl,
   logoutSession,
+  registerPushToken,
   requestOtp as requestOtpApi,
   verifyOtp as verifyOtpApi,
 } from '../services/api';
+import { registerForPushNotificationsAsync } from '../services/pushNotifications';
 import {
   clearSessionToken,
   persistSessionToken,
@@ -79,6 +82,43 @@ export function AuthProvider({ children }) {
       isMounted = false;
     };
   }, [syncSession]);
+
+  useEffect(() => {
+    if (!session?.token || !hasApiBaseUrl) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    let activePushToken = null;
+
+    async function syncPushToken() {
+      const payload = await registerForPushNotificationsAsync();
+
+      if (!payload || cancelled) {
+        return;
+      }
+
+      activePushToken = payload.expoPushToken;
+
+      try {
+        await registerPushToken(payload, session.token);
+      } catch (_error) {
+        // Keep auth stable even if push registration fails.
+      }
+    }
+
+    syncPushToken();
+
+    return () => {
+      cancelled = true;
+
+      if (activePushToken) {
+        deletePushToken(activePushToken, session.token).catch(() => {
+          // Token cleanup can safely fail during sign-out or app close.
+        });
+      }
+    };
+  }, [session?.token]);
 
   const requestOtp = useCallback(async (phone) => {
     setLoading(true);

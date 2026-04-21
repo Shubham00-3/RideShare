@@ -1,91 +1,130 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, Linking } from 'react-native';
-import { AlertTriangle, Phone, MapPin, X, Shield, Users, Share2 } from 'lucide-react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  Alert,
+  Animated,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { AlertTriangle, Phone, Shield, Users, X } from 'lucide-react-native';
 import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
-import { USER_PROFILE } from '../constants/data';
+import { useAuth } from '../context/AuthContext';
+import { useRide } from '../context/RideContext';
+import { triggerBookingSos } from '../services/api';
 
-export default function SOSScreen({ navigation }) {
+export default function SOSScreen({ navigation, route }) {
+  const { token } = useAuth();
+  const { activeBookingId, activeTrip } = useRide();
   const pulseAnim = useState(new Animated.Value(1))[0];
   const [countdown, setCountdown] = useState(5);
   const [activated, setActivated] = useState(false);
+  const bookingId = route.params?.bookingId || activeBookingId;
 
   useEffect(() => {
     Animated.loop(Animated.sequence([
       Animated.timing(pulseAnim, { toValue: 1.3, duration: 600, useNativeDriver: true }),
       Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
     ])).start();
-  }, []);
+  }, [pulseAnim]);
 
   useEffect(() => {
     if (activated && countdown > 0) {
-      const t = setTimeout(() => setCountdown(c => c - 1), 1000);
-      return () => clearTimeout(t);
+      const timeout = setTimeout(() => setCountdown((value) => value - 1), 1000);
+      return () => clearTimeout(timeout);
     }
-  }, [activated, countdown]);
+
+    if (activated && countdown === 0 && bookingId && token) {
+      triggerBookingSos(
+        bookingId,
+        {
+          latitude: activeTrip?.currentLocation?.coordinates?.latitude || null,
+          longitude: activeTrip?.currentLocation?.coordinates?.longitude || null,
+          summary: 'Emergency SOS triggered from rider app.',
+        },
+        token
+      )
+        .then(() => {
+          Alert.alert('SOS activated', 'Support and your emergency contacts have been alerted.');
+        })
+        .catch((error) => {
+          Alert.alert('SOS failed', error.message || 'We could not open the emergency incident.');
+          setActivated(false);
+          setCountdown(5);
+        });
+    }
+
+    return undefined;
+  }, [activated, activeTrip?.currentLocation?.coordinates?.latitude, activeTrip?.currentLocation?.coordinates?.longitude, bookingId, countdown, token]);
 
   return (
-    <View style={s.container}>
-      <TouchableOpacity style={s.closeBtn} onPress={() => navigation.goBack()}>
+    <View style={styles.container}>
+      <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()}>
         <X size={24} color="#FFF" />
       </TouchableOpacity>
 
-      <View style={s.content}>
-        <Animated.View style={[s.sosCircle, { transform: [{ scale: pulseAnim }] }]}>
-          <View style={s.sosInner}>
+      <View style={styles.content}>
+        <Animated.View style={[styles.sosCircle, { transform: [{ scale: pulseAnim }] }]}>
+          <View style={styles.sosInner}>
             <AlertTriangle size={48} color="#FFF" />
-            <Text style={s.sosText}>SOS</Text>
+            <Text style={styles.sosText}>SOS</Text>
           </View>
         </Animated.View>
 
         {!activated ? (
           <>
-            <Text style={s.title}>Emergency Assistance</Text>
-            <Text style={s.subtitle}>Tap the button below to alert emergency contacts and share your live location</Text>
-            <TouchableOpacity style={s.activateBtn} onPress={() => setActivated(true)}>
+            <Text style={styles.title}>Emergency Assistance</Text>
+            <Text style={styles.subtitle}>
+              Triggering SOS will notify support, create an incident, and attach your current trip location.
+            </Text>
+            <TouchableOpacity style={styles.activateBtn} onPress={() => setActivated(true)}>
               <AlertTriangle size={20} color="#FFF" />
-              <Text style={s.activateBtnText}>Activate Emergency SOS</Text>
+              <Text style={styles.activateBtnText}>Activate Emergency SOS</Text>
             </TouchableOpacity>
           </>
         ) : (
           <>
-            <Text style={s.title}>SOS Activated</Text>
-            <Text style={s.subtitle}>
-              {countdown > 0 ? `Alerting emergency contacts in ${countdown}s...` : '📍 Location shared with emergency contacts'}
+            <Text style={styles.title}>SOS Countdown</Text>
+            <Text style={styles.subtitle}>
+              {countdown > 0
+                ? `Alerting support in ${countdown}s...`
+                : 'Emergency incident is being created.'}
             </Text>
-            <TouchableOpacity style={s.cancelBtn} onPress={() => { setActivated(false); setCountdown(5); }}>
-              <Text style={s.cancelText}>{countdown > 0 ? 'Cancel' : 'Deactivate'}</Text>
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={() => {
+                setActivated(false);
+                setCountdown(5);
+              }}
+            >
+              <Text style={styles.cancelText}>{countdown > 0 ? 'Cancel' : 'Close'}</Text>
             </TouchableOpacity>
           </>
         )}
       </View>
 
-      <View style={s.actions}>
-        <TouchableOpacity style={s.actionCard} onPress={() => Linking.openURL('tel:112')}>
-          <View style={[s.actionIcon, {backgroundColor: COLORS.error+'15'}]}><Phone size={22} color={COLORS.error} /></View>
-          <Text style={s.actionLabel}>Call 112</Text>
-          <Text style={s.actionDesc}>Police</Text>
+      <View style={styles.actions}>
+        <TouchableOpacity style={styles.actionCard} onPress={() => Alert.alert('Emergency number', 'Dial 112 from your phone if immediate response is needed.')}>
+          <View style={[styles.actionIcon, {backgroundColor: COLORS.error+'15'}]}><Phone size={22} color={COLORS.error} /></View>
+          <Text style={styles.actionLabel}>Call 112</Text>
+          <Text style={styles.actionDesc}>Emergency services</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={s.actionCard}>
-          <View style={[s.actionIcon, {backgroundColor: COLORS.primary+'15'}]}><Share2 size={22} color={COLORS.primary} /></View>
-          <Text style={s.actionLabel}>Share Trip</Text>
-          <Text style={s.actionDesc}>Live location</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={s.actionCard}>
-          <View style={[s.actionIcon, {backgroundColor: COLORS.success+'15'}]}><Users size={22} color={COLORS.success} /></View>
-          <Text style={s.actionLabel}>Contacts</Text>
-          <Text style={s.actionDesc}>{USER_PROFILE.emergencyContacts.length} saved</Text>
+        <TouchableOpacity style={styles.actionCard}>
+          <View style={[styles.actionIcon, {backgroundColor: COLORS.primary+'15'}]}><Users size={22} color={COLORS.primary} /></View>
+          <Text style={styles.actionLabel}>Contacts</Text>
+          <Text style={styles.actionDesc}>From your profile</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={s.footer}>
+      <View style={styles.footer}>
         <Shield size={14} color="rgba(255,255,255,0.5)" />
-        <Text style={s.footerText}>All rides are GPS tracked and insured up to ₹5 lakh</Text>
+        <Text style={styles.footerText}>SOS incidents appear live in the admin console and support queue</Text>
       </View>
     </View>
   );
 }
 
-const s = StyleSheet.create({
+const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#1A1A2E', alignItems: 'center' },
   closeBtn: { position: 'absolute', top: 60, right: 20, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   content: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
@@ -103,6 +142,6 @@ const s = StyleSheet.create({
   actionIcon: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
   actionLabel: { fontSize: SIZES.sm, color: '#FFF', ...FONTS.semiBold },
   actionDesc: { fontSize: SIZES.xs, color: 'rgba(255,255,255,0.5)', ...FONTS.regular },
-  footer: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 40 },
-  footerText: { fontSize: SIZES.xs, color: 'rgba(255,255,255,0.4)', ...FONTS.regular },
+  footer: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 40, paddingHorizontal: 20 },
+  footerText: { fontSize: SIZES.xs, color: 'rgba(255,255,255,0.4)', ...FONTS.regular, textAlign: 'center' },
 });

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react-native';
 import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
+import { useRealtime } from '../context/RealtimeContext';
 import {
   acceptDriverRequest,
   fetchDriverTrips,
@@ -87,6 +88,7 @@ function buildNextDriverLocation(booking) {
 
 export default function DriverDashboardScreen() {
   const { token, user } = useAuth();
+  const { isConnected, subscribe, watchDriver } = useRealtime();
   const [dashboard, setDashboard] = useState({
     driver: null,
     items: [],
@@ -135,10 +137,20 @@ export default function DriverDashboardScreen() {
   }, [isDriver, token]);
 
   useEffect(() => {
+    watchDriver();
     loadDriverDashboard().catch(() => {
       // Screen state already shows the error.
     });
-  }, [loadDriverDashboard]);
+  }, [loadDriverDashboard, watchDriver]);
+
+  useEffect(() => subscribe((eventName, payload) => {
+    if (
+      eventName === 'booking:update' &&
+      (payload?.eventType?.startsWith('driver_') || payload?.eventType?.startsWith('booking_'))
+    ) {
+      loadDriverDashboard().catch(() => {});
+    }
+  }), [loadDriverDashboard, subscribe]);
 
   const handleSettingsChange = useCallback(async (patch) => {
     if (!token) {
@@ -273,7 +285,11 @@ export default function DriverDashboardScreen() {
           <View>
             <Text style={styles.headerTitle}>Driver Mode</Text>
             <Text style={styles.headerSub}>
-              {isOnline ? 'Online and receiving rider demand' : 'Offline'}
+              {isOnline
+                ? isConnected
+                  ? 'Online with realtime sync'
+                  : 'Online with polling fallback'
+                : 'Offline'}
             </Text>
           </View>
           <Switch

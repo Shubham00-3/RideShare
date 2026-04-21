@@ -85,6 +85,106 @@ function resetRateLimit(store, key) {
   store.delete(key);
 }
 
+async function enforcePersistentRateLimit(client, action, subject, limit, windowMs, message) {
+  const result = await client.query(
+    `
+      select
+        action,
+        subject,
+        attempt_count,
+        window_started_at,
+        blocked_until
+      from auth_rate_limits
+      where action = $1
+        and subject = $2
+      for update
+    `,
+    [action, subject]
+  );
+
+  const now = new Date();
+  const row = result.rows[0];
+
+  if (!row) {
+    await client.query(
+      `
+        insert into auth_rate_limits (
+          action,
+          subject,
+          attempt_count,
+          window_started_at,
+          last_attempt_at
+        )
+        values ($1, $2, 1, now(), now())
+      `,
+      [action, subject]
+    );
+    return;
+  }
+
+  if (row.blocked_until && new Date(row.blocked_until) > now) {
+    throw new Error(message);
+  }
+
+  const windowStartedAt = row.window_started_at ? new Date(row.window_started_at) : now;
+  const isExpiredWindow = now.getTime() - windowStartedAt.getTime() > windowMs;
+
+  if (isExpiredWindow) {
+    await client.query(
+      `
+        update auth_rate_limits
+        set
+          attempt_count = 1,
+          window_started_at = now(),
+          blocked_until = null,
+          last_attempt_at = now()
+        where action = $1
+          and subject = $2
+      `,
+      [action, subject]
+    );
+    return;
+  }
+
+  if (Number(row.attempt_count || 0) >= limit) {
+    await client.query(
+      `
+        update auth_rate_limits
+        set
+          blocked_until = now() + ($3 || ' milliseconds')::interval,
+          last_attempt_at = now()
+        where action = $1
+          and subject = $2
+      `,
+      [action, subject, String(windowMs)]
+    );
+    throw new Error(message);
+  }
+
+  await client.query(
+    `
+      update auth_rate_limits
+      set
+        attempt_count = attempt_count + 1,
+        last_attempt_at = now()
+      where action = $1
+        and subject = $2
+    `,
+    [action, subject]
+  );
+}
+
+async function resetPersistentRateLimit(client, action, subject) {
+  await client.query(
+    `
+      delete from auth_rate_limits
+      where action = $1
+        and subject = $2
+    `,
+    [action, subject]
+  );
+}
+
 async function ensureRiderUser(client, phone) {
   const existingUser = await client.query(
     `
@@ -165,6 +265,14 @@ async function requestOtp(phone) {
 
   try {
     await client.query('begin');
+    await enforcePersistentRateLimit(
+      client,
+      'otp_request',
+      normalizedPhone,
+      REQUEST_LIMIT,
+      REQUEST_WINDOW_MS,
+      'Too many OTP requests. Please wait a few minutes before trying again.'
+    );
 
     const user = await ensureRiderUser(client, normalizedPhone);
 
@@ -245,6 +353,14 @@ async function verifyOtp(phone, code) {
 
   try {
     await client.query('begin');
+    await enforcePersistentRateLimit(
+      client,
+      'otp_verify',
+      normalizedPhone,
+      VERIFY_LIMIT,
+      VERIFY_WINDOW_MS,
+      'Too many OTP verification attempts. Please request a new code and try again.'
+    );
 
     const user = await ensureRiderUser(client, normalizedPhone);
 
@@ -301,6 +417,7 @@ async function verifyOtp(phone, code) {
     }
 
     const session = await createSessionForUser(client, user.id);
+    await resetPersistentRateLimit(client, 'otp_verify', normalizedPhone);
     await client.query('commit');
     resetRateLimit(verifyRateLimitStore, normalizedPhone);
 

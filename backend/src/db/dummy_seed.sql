@@ -4,8 +4,26 @@ values
   ('55555555-5555-5555-5555-555555555555', 'Riya Verma', '+919876543211', 'riya@rideshare.in', 'rider', 4.90),
   ('66666666-6666-6666-6666-666666666666', 'Neha Arora', '+919876543212', 'neha@rideshare.in', 'rider', 4.70),
   ('77777777-7777-7777-7777-777777777777', 'Vikram Patel', '+919999900004', 'vikram@rideshare.in', 'driver', 4.85),
-  ('88888888-8888-8888-8888-888888888888', 'Sonal Mehta', '+919999900005', 'sonal@rideshare.in', 'driver', 4.92)
+  ('88888888-8888-8888-8888-888888888888', 'Sonal Mehta', '+919999900005', 'sonal@rideshare.in', 'driver', 4.92),
+  ('99999999-9999-9999-9999-999999999999', 'Ops Admin', '+919999900006', 'ops@rideshare.in', 'admin', 5.00)
 on conflict (id) do nothing;
+
+insert into saved_places (user_id, label, address, latitude, longitude, is_default)
+values
+  ('44444444-4444-4444-4444-444444444444', 'Home', 'Sector 62, Noida', 28.628000, 77.364900, true),
+  ('44444444-4444-4444-4444-444444444444', 'Office', 'Connaught Place, New Delhi', 28.631500, 77.216700, false)
+on conflict do nothing;
+
+insert into emergency_contacts (user_id, name, phone, relationship)
+values
+  ('44444444-4444-4444-4444-444444444444', 'Mom', '+919876512345', 'Family'),
+  ('44444444-4444-4444-4444-444444444444', 'Dad', '+919876567890', 'Family')
+on conflict do nothing;
+
+insert into notification_preferences (user_id, push_enabled, trip_updates_enabled, safety_alerts_enabled, marketing_enabled, sms_enabled)
+values
+  ('44444444-4444-4444-4444-444444444444', true, true, true, false, false)
+on conflict (user_id) do nothing;
 
 insert into drivers (id, user_id, full_name, rating, trip_count, commission_percent, streak_count, return_trip_available)
 values

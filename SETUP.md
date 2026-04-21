@@ -77,6 +77,7 @@ Create `.env` in the repo root using [`.env.example`](./.env.example):
 ```env
 EXPO_PUBLIC_API_BASE_URL=http://127.0.0.1:4000
 EXPO_PUBLIC_ALLOW_DEV_MOCK_FALLBACKS=false
+EXPO_PUBLIC_EXPO_PROJECT_ID=
 ```
 
 Important:
@@ -99,6 +100,8 @@ ALLOWED_ORIGIN=*
 AUTH_EXPOSE_DEV_OTP=true
 AUTH_OTP_TTL_MINUTES=5
 AUTH_SESSION_DAYS=30
+PUBLIC_APP_URL=http://127.0.0.1:4000
+EXPO_PROJECT_ID=
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_VERIFY_SERVICE_SID=
@@ -111,6 +114,8 @@ Field notes:
 
 - `DATABASE_URL`: local PostgreSQL connection string
 - `AUTH_EXPOSE_DEV_OTP=true`: useful for development because OTP can be shown without a real SMS provider
+- `PUBLIC_APP_URL`: used when generating trip-sharing links from the backend
+- `EXPO_PROJECT_ID`: needed to register Expo push tokens from the mobile app
 - `TWILIO_*`: required only when you disable dev OTP mode and want real SMS verification
 - `PELIAS_BASE_URL`: backend autocomplete provider endpoint
 - `PELIAS_API_KEY`: needed if your Pelias-compatible provider requires auth

@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { getBookingById, getDriverBookings } = require('./bookingService');
+const { emitBookingEvent } = require('./realtimeService');
 const { getGeometryOverlapScore, toNumber } = require('./routeMath');
 
 function buildStatusError(message, statusCode) {
@@ -347,10 +348,12 @@ async function updateDriverLocation({ bookingId, latitude, longitude, userId }) 
     [tripRow.active_trip_id, lat, lng]
   );
 
-  return getBookingById(tripRow.booking_id, {
+  const booking = await getBookingById(tripRow.booking_id, {
     userId,
     userRole: 'driver',
   });
+  await emitBookingEvent('driver_location_updated', tripRow.booking_id);
+  return booking;
 }
 
 async function acceptIncomingRequest({ requestId, userId }) {
@@ -429,10 +432,12 @@ async function acceptIncomingRequest({ requestId, userId }) {
 
       if (existingBooking.rows[0]?.id) {
         await client.query('commit');
-        return getBookingById(existingBooking.rows[0].id, {
+        const booking = await getBookingById(existingBooking.rows[0].id, {
           userId,
           userRole: 'driver',
         });
+        await emitBookingEvent('driver_request_reused', existingBooking.rows[0].id);
+        return booking;
       }
 
       throw new Error('This rider request has already been assigned.');
@@ -534,10 +539,12 @@ async function acceptIncomingRequest({ requestId, userId }) {
     );
 
     await client.query('commit');
-    return getBookingById(bookingId, {
+    const booking = await getBookingById(bookingId, {
       userId,
       userRole: 'driver',
     });
+    await emitBookingEvent('driver_request_accepted', bookingId);
+    return booking;
   } catch (error) {
     await client.query('rollback');
     throw error;

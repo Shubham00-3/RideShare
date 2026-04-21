@@ -2,6 +2,7 @@ const env = require('../config/env');
 
 function getReadinessStatus() {
   const issues = [];
+  const providerIssues = [];
 
   if (!env.databaseUrl) {
     issues.push('DATABASE_URL is not configured.');
@@ -22,17 +23,34 @@ function getReadinessStatus() {
   }
 
   if (!env.peliasBaseUrl) {
-    issues.push('PELIAS_BASE_URL is not configured.');
+    providerIssues.push('PELIAS_BASE_URL is not configured.');
   }
 
   if (!env.valhallaBaseUrl) {
-    issues.push('VALHALLA_BASE_URL is not configured.');
+    providerIssues.push('VALHALLA_BASE_URL is not configured.');
+  }
+
+  if (!env.appBaseUrl) {
+    issues.push('PUBLIC_APP_URL is not configured.');
+  }
+
+  if (!env.expoProjectId) {
+    issues.push('EXPO_PROJECT_ID is not configured.');
+  }
+
+  const shouldRequireProviders = env.nodeEnv === 'production';
+
+  if (shouldRequireProviders) {
+    issues.push(...providerIssues);
   }
 
   return {
     ok: issues.length === 0,
+    appBaseUrlConfigured: Boolean(env.appBaseUrl),
     databaseConfigured: Boolean(env.databaseUrl),
+    expoProjectIdConfigured: Boolean(env.expoProjectId),
     peliasConfigured: Boolean(env.peliasBaseUrl),
+    providerWarnings: providerIssues,
     twilioConfigured: Boolean(
       env.twilioAccountSid && env.twilioAuthToken && env.twilioVerifyServiceSid
     ),

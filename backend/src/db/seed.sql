@@ -8,7 +8,8 @@ insert into users (id, full_name, phone, email, role, rating)
 values
   ('11111111-1111-1111-1111-111111111111', 'Rajesh Kumar', '+919999900001', 'rajesh@rideshare.in', 'driver', 4.90),
   ('22222222-2222-2222-2222-222222222222', 'Priya Malhotra', '+919999900002', 'priya@rideshare.in', 'driver', 4.80),
-  ('33333333-3333-3333-3333-333333333333', 'Amit Sharma', '+919999900003', 'amit@rideshare.in', 'driver', 4.70)
+  ('33333333-3333-3333-3333-333333333333', 'Amit Sharma', '+919999900003', 'amit@rideshare.in', 'driver', 4.70),
+  ('99999999-9999-9999-9999-999999999999', 'Ops Admin', '+919999900006', 'ops@rideshare.in', 'admin', 5.00)
 on conflict (id) do nothing;
 
 insert into drivers (id, user_id, full_name, rating, trip_count, commission_percent, streak_count, return_trip_available)

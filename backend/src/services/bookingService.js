@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { emitBookingEvent } = require('./realtimeService');
 const {
   clamp,
   getLineDistanceKm,
@@ -52,7 +53,10 @@ const BOOKING_SELECT_COLUMNS = `
   driver_user.id as driver_user_id,
   driver_user.phone as driver_phone,
   rider_user.full_name as rider_name,
-  rider_user.phone as rider_phone
+  rider_user.phone as rider_phone,
+  tr.score as rider_rating_score,
+  tr.comment as rider_rating_comment,
+  tr.created_at as rider_rating_created_at
 `;
 
 const BOOKING_JOINS = `
@@ -63,6 +67,7 @@ const BOOKING_JOINS = `
   left join drivers d on d.id = at.driver_id
   left join users driver_user on driver_user.id = d.user_id
   left join users rider_user on rider_user.id = rr.rider_id
+  left join trip_ratings tr on tr.booking_id = b.id and tr.rater_user_id = rr.rider_id
 `;
 
 function buildStatusError(message, statusCode) {
@@ -337,6 +342,14 @@ function normalizeBookingRow(row) {
         phone: row.driver_phone || '+91 99999 11111',
       },
       midTripOffer: liveTripState.midTripOffer,
+      rating:
+        row.rider_rating_score != null
+          ? {
+              comment: row.rider_rating_comment || '',
+              createdAt: row.rider_rating_created_at || null,
+              score: toNumber(row.rider_rating_score),
+            }
+          : null,
     },
   };
 }
@@ -653,15 +666,15 @@ async function updateDriverBookingStatus({ bookingId, status, userId }) {
               else completed_at
             end,
             current_lat = case
-              when current_lat is null and $3 is not null then $3
+              when current_lat is null and $3::numeric is not null then $3::numeric
               else current_lat
             end,
             current_lng = case
-              when current_lng is null and $4 is not null then $4
+              when current_lng is null and $4::numeric is not null then $4::numeric
               else current_lng
             end,
             last_location_at = case
-              when current_lat is null and $3 is not null then now()
+              when current_lat is null and $3::numeric is not null then now()
               else last_location_at
             end
           where id = $1
@@ -676,7 +689,9 @@ async function updateDriverBookingStatus({ bookingId, status, userId }) {
     }
 
     await client.query('commit');
-    return getBookingById(bookingId);
+    const booking = await getBookingById(bookingId);
+    await emitBookingEvent(`driver_status_${nextStatus}`, bookingId);
+    return booking;
   } catch (error) {
     await client.query('rollback');
     throw error;
@@ -776,9 +791,11 @@ async function cancelBookingForUser({ bookingId, userId }) {
     }
 
     await client.query('commit');
-    return getBookingById(bookingId, {
+    const booking = await getBookingById(bookingId, {
       userId,
     });
+    await emitBookingEvent('booking_cancelled', bookingId);
+    return booking;
   } catch (error) {
     await client.query('rollback');
     throw error;
@@ -925,9 +942,11 @@ async function confirmBooking({ request, match, quote, options = {}, userId }) {
     }
 
     await client.query('commit');
-    return getBookingById(insertBooking.rows[0].id, {
+    const booking = await getBookingById(insertBooking.rows[0].id, {
       userId,
     });
+    await emitBookingEvent('booking_confirmed', insertBooking.rows[0].id);
+    return booking;
   } catch (error) {
     await client.query('rollback');
     throw error;
@@ -936,12 +955,273 @@ async function confirmBooking({ request, match, quote, options = {}, userId }) {
   }
 }
 
+async function rescheduleBooking({ bookingId, departureTime, userId }) {
+  const pool = db.getPool();
+
+  if (!pool) {
+    throw new Error('Database is required for booking reschedules.');
+  }
+
+  const nextDeparture = new Date(departureTime);
+
+  if (Number.isNaN(nextDeparture.getTime()) || nextDeparture.getTime() <= Date.now()) {
+    throw buildStatusError('A future departure time is required.', 400);
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('begin');
+
+    const result = await client.query(
+      `
+        select
+          b.id as booking_id,
+          b.booking_status,
+          rr.id as ride_request_id,
+          rr.rider_id
+        from bookings b
+        join ride_requests rr on rr.id = b.ride_request_id
+        where b.id = $1
+        limit 1
+      `,
+      [bookingId]
+    );
+
+    const row = result.rows[0];
+
+    if (!row) {
+      throw buildStatusError('Booking not found.', 404);
+    }
+
+    if (row.rider_id !== userId) {
+      throw buildStatusError('You can only reschedule your own bookings.', 403);
+    }
+
+    if (['completed', 'cancelled'].includes(String(row.booking_status || '').toLowerCase())) {
+      throw buildStatusError('Completed or cancelled bookings cannot be rescheduled.', 409);
+    }
+
+    await client.query(
+      `
+        update ride_requests
+        set departure_time = $2
+        where id = $1
+      `,
+      [row.ride_request_id, nextDeparture.toISOString()]
+    );
+
+    await client.query('commit');
+    const booking = await getBookingById(bookingId, {
+      userId,
+    });
+    await emitBookingEvent('booking_rescheduled', bookingId);
+    return booking;
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function submitBookingRating({ bookingId, comment, score, userId }) {
+  const pool = db.getPool();
+  const normalizedScore = Math.round(Number(score));
+
+  if (!pool) {
+    throw new Error('Database is required for ratings.');
+  }
+
+  if (!Number.isFinite(normalizedScore) || normalizedScore < 1 || normalizedScore > 5) {
+    throw buildStatusError('Ratings must be between 1 and 5.', 400);
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('begin');
+
+    const bookingResult = await client.query(
+      `
+        select
+          b.id as booking_id,
+          b.booking_status,
+          rr.rider_id,
+          driver_user.id as driver_user_id
+        from bookings b
+        join ride_requests rr on rr.id = b.ride_request_id
+        left join active_trips at on at.id = b.active_trip_id
+        left join drivers d on d.id = at.driver_id
+        left join users driver_user on driver_user.id = d.user_id
+        where b.id = $1
+        limit 1
+      `,
+      [bookingId]
+    );
+
+    const bookingRow = bookingResult.rows[0];
+
+    if (!bookingRow) {
+      throw buildStatusError('Booking not found.', 404);
+    }
+
+    if (bookingRow.rider_id !== userId) {
+      throw buildStatusError('Only the rider who owns the booking can leave a rating.', 403);
+    }
+
+    if (String(bookingRow.booking_status || '').toLowerCase() !== 'completed') {
+      throw buildStatusError('Ratings can only be submitted after a trip is completed.', 409);
+    }
+
+    if (!bookingRow.driver_user_id) {
+      throw buildStatusError('This booking does not have an assigned driver to rate.', 409);
+    }
+
+    await client.query(
+      `
+        insert into trip_ratings (
+          booking_id,
+          rater_user_id,
+          subject_user_id,
+          score,
+          comment
+        )
+        values ($1, $2, $3, $4, $5)
+        on conflict (booking_id, rater_user_id) do update
+          set
+            score = excluded.score,
+            comment = excluded.comment,
+            updated_at = now()
+      `,
+      [bookingId, userId, bookingRow.driver_user_id, normalizedScore, String(comment || '').trim() || null]
+    );
+
+    await client.query(
+      `
+        update users
+        set rating = ratings.average_score
+        from (
+          select
+            subject_user_id,
+            avg(score)::numeric(3,2) as average_score
+          from trip_ratings
+          where subject_user_id = $1
+          group by subject_user_id
+        ) ratings
+        where users.id = ratings.subject_user_id
+      `,
+      [bookingRow.driver_user_id]
+    );
+
+    await client.query(
+      `
+        update drivers
+        set rating = users.rating
+        from users
+        where drivers.user_id = users.id
+          and drivers.user_id = $1
+      `,
+      [bookingRow.driver_user_id]
+    );
+
+    await client.query('commit');
+    const booking = await getBookingById(bookingId, {
+      userId,
+    });
+    await emitBookingEvent('booking_rated', bookingId);
+    return booking;
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getRatingsForUser(userId) {
+  const [givenResult, receivedResult] = await Promise.all([
+    db.query(
+      `
+        select
+          tr.*,
+          subject.full_name as subject_name
+        from trip_ratings tr
+        join users subject on subject.id = tr.subject_user_id
+        where tr.rater_user_id = $1
+        order by tr.created_at desc
+      `,
+      [userId]
+    ),
+    db.query(
+      `
+        select
+          tr.*,
+          rater.full_name as rater_name
+        from trip_ratings tr
+        join users rater on rater.id = tr.rater_user_id
+        where tr.subject_user_id = $1
+        order by tr.created_at desc
+      `,
+      [userId]
+    ),
+  ]);
+
+  return {
+    given: givenResult.rows.map((row) => ({
+      bookingId: row.booking_id,
+      comment: row.comment || '',
+      createdAt: row.created_at,
+      id: row.id,
+      score: toNumber(row.score),
+      subjectName: row.subject_name,
+    })),
+    received: receivedResult.rows.map((row) => ({
+      bookingId: row.booking_id,
+      comment: row.comment || '',
+      createdAt: row.created_at,
+      id: row.id,
+      raterName: row.rater_name,
+      score: toNumber(row.score),
+    })),
+  };
+}
+
+async function adminUpdateBooking({ bookingId, status }) {
+  const normalizedStatus = String(status || '').trim().toLowerCase();
+
+  if (!['confirmed', 'completed', 'cancelled'].includes(normalizedStatus)) {
+    throw buildStatusError('Unsupported admin booking status.', 400);
+  }
+
+  const result = await db.query(
+    `
+      update bookings
+      set booking_status = $2
+      where id = $1
+      returning id
+    `,
+    [bookingId, normalizedStatus]
+  );
+
+  if (!result.rows[0]) {
+    throw buildStatusError('Booking not found.', 404);
+  }
+
+  await emitBookingEvent('admin_booking_updated', bookingId);
+  return getBookingById(bookingId);
+}
+
 module.exports = {
+  adminUpdateBooking,
   cancelBookingForUser,
   calculateQuote,
   confirmBooking,
   getBookingById,
   getBookingsForUser,
   getDriverBookings,
+  getRatingsForUser,
+  rescheduleBooking,
+  submitBookingRating,
   updateDriverBookingStatus,
 };

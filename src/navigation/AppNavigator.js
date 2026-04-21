@@ -4,7 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { BottomTabBar, createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Home, Clock, User, Car, ChevronRight, Navigation } from 'lucide-react-native';
+import { Home, Clock, User, Car, ChevronRight, Navigation, ShieldCheck } from 'lucide-react-native';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
 import { useRide } from '../context/RideContext';
@@ -20,8 +20,10 @@ import ActiveTripScreen from '../screens/ActiveTripScreen';
 import BookingDetailScreen from '../screens/BookingDetailScreen';
 import TripHistoryScreen from '../screens/TripHistoryScreen';
 import DriverDashboardScreen from '../screens/DriverDashboardScreen';
+import AdminDashboardScreen from '../screens/AdminDashboardScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SOSScreen from '../screens/SOSScreen';
+import SupportScreen from '../screens/SupportScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -80,6 +82,7 @@ function MainTabs() {
     activeTrip && !['completed', 'cancelled'].includes(String(activeTrip.status || ''))
   );
   const isDriver = user?.role === 'driver';
+  const isAdmin = user?.role === 'admin';
 
   return (
     <Tab.Navigator
@@ -130,6 +133,15 @@ function MainTabs() {
           }}
         />
       ) : null}
+      {isAdmin ? (
+        <Tab.Screen
+          name="Admin"
+          component={AdminDashboardScreen}
+          options={{
+            tabBarIcon: ({ color, size }) => <ShieldCheck size={size} color={color} />,
+          }}
+        />
+      ) : null}
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
@@ -172,6 +184,7 @@ export default function AppNavigator() {
             <Stack.Screen name="ActiveTrip" component={ActiveTripScreen} />
             <Stack.Screen name="BookingDetail" component={BookingDetailScreen} />
             <Stack.Screen name="SOS" component={SOSScreen} />
+            <Stack.Screen name="Support" component={SupportScreen} />
           </>
         ) : (
           <>

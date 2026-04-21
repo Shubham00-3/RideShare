@@ -84,5 +84,4 @@ npm run seed:dummy
 
 - configure Twilio Verify for non-dev SMS OTP delivery
 - broaden automated coverage beyond the current Jest + Supertest suite
-- add websocket transport on top of polling for active trip updates
 - add payment integration and transaction records

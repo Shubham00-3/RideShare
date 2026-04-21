@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useAuth } from './AuthContext';
+import { useRealtime } from './RealtimeContext';
 import {
   cancelRideBooking,
   confirmRideBooking,
@@ -44,6 +45,7 @@ function buildCancelledTrip(trip) {
 
 export function RideProvider({ children }) {
   const { signOut, token } = useAuth();
+  const { subscribe } = useRealtime();
   const [searchForm, setSearchForm] = useState(DEFAULT_SEARCH);
   const [rideRequest, setRideRequest] = useState(null);
   const [matches, setMatches] = useState([]);
@@ -75,6 +77,34 @@ export function RideProvider({ children }) {
     setError(null);
     setLoading(false);
   }, [token]);
+
+  useEffect(() => {
+    return subscribe((eventName, payload) => {
+      if (eventName !== 'booking:update' || !payload?.booking) {
+        return;
+      }
+
+      const nextBooking = payload.booking;
+
+      setBookingHistory((previous) => {
+        const hasExistingBooking = previous.some((item) => item.bookingId === nextBooking.bookingId);
+        const nextItems = hasExistingBooking
+          ? previous.map((item) => (item.bookingId === nextBooking.bookingId ? nextBooking : item))
+          : [nextBooking, ...previous];
+
+        return nextItems;
+      });
+
+      setActiveBookingId((previous) =>
+        previous === nextBooking.bookingId || !previous ? nextBooking.bookingId : previous
+      );
+
+      if (activeBookingId === nextBooking.bookingId) {
+        setActiveTrip(nextBooking.trip);
+        setActiveBookingSource(nextBooking.source || 'api');
+      }
+    });
+  }, [activeBookingId, subscribe]);
 
   const searchRides = useCallback(async (input) => {
     const nextSearch = {
