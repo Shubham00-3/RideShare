@@ -47,6 +47,7 @@ function publicUser(row) {
     name: row.full_name,
     phone: row.phone,
     email: row.email || null,
+    gender: row.gender || 'unspecified',
     role: row.role,
     rating: Number(row.rating || 5),
   };
@@ -193,6 +194,7 @@ async function ensureRiderUser(client, phone) {
         full_name,
         phone,
         email,
+        gender,
         role,
         rating
       from users
@@ -215,7 +217,7 @@ async function ensureRiderUser(client, phone) {
         role
       )
       values ($1, $2, 'rider')
-      returning id, full_name, phone, email, role, rating
+      returning id, full_name, phone, email, gender, role, rating
     `,
     [`RideShare Rider ${suffix}`, phone]
   );
@@ -377,6 +379,7 @@ async function verifyOtp(phone, code) {
             u.full_name,
             u.phone as user_phone,
             u.email,
+            u.gender,
             u.role,
             u.rating
           from auth_otps o
@@ -452,6 +455,7 @@ async function getSessionFromToken(token, options = {}) {
         u.full_name,
         u.phone,
         u.email,
+        u.gender,
         u.role,
         u.rating
       from user_sessions s

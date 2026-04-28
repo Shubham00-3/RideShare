@@ -25,6 +25,7 @@ const BOOKING_SELECT_COLUMNS = `
   rr.dropoff_lng,
   rr.ride_type,
   rr.allow_mid_trip_pickup,
+  rr.women_only,
   rr.departure_time,
   rr.origin_km,
   rr.destination_km,
@@ -52,8 +53,10 @@ const BOOKING_SELECT_COLUMNS = `
   d.trip_count as driver_trip_count,
   driver_user.id as driver_user_id,
   driver_user.phone as driver_phone,
+  driver_user.gender as driver_gender,
   rider_user.full_name as rider_name,
   rider_user.phone as rider_phone,
+  rider_user.gender as rider_gender,
   tr.score as rider_rating_score,
   tr.comment as rider_rating_comment,
   tr.created_at as rider_rating_created_at
@@ -297,6 +300,7 @@ function normalizeBookingRow(row) {
     rider:
       row.rider_name || row.rider_phone
         ? {
+            gender: row.rider_gender || 'unspecified',
             name: row.rider_name || 'Assigned rider',
             phone: row.rider_phone || null,
           }
@@ -311,6 +315,7 @@ function normalizeBookingRow(row) {
       currentLocation: liveTripState.currentLocation,
       routeLabel: `${pickupLabel.split(',')[0]} -> ${dropoffLabel.split(',')[0]}`,
       rideType: row.ride_type || 'shared',
+      womenOnly: Boolean(row.women_only),
       departureTime: row.departure_time || null,
       allowMidTripPickup: row.allow_mid_trip_pickup ?? row.allow_mid_trip_join ?? true,
       etaMinutes: liveTripState.remainingMinutes,
@@ -337,6 +342,7 @@ function normalizeBookingRow(row) {
       },
       driver: {
         name: driverName,
+        gender: row.driver_gender || 'unspecified',
         rating: toNumber(row.driver_rating || 4.9),
         trips: toNumber(row.driver_trip_count || 1000),
         phone: row.driver_phone || '+91 99999 11111',
@@ -415,7 +421,8 @@ async function ensureRideRequestOwnership(client, rideRequestId, userId) {
       select
         id,
         rider_id,
-        status
+        status,
+        women_only
       from ride_requests
       where id = $1
       limit 1
@@ -445,6 +452,75 @@ async function ensureRideRequestOwnership(client, rideRequestId, userId) {
   }
 
   return rideRequest;
+}
+
+async function assertTripSafetyCompatibility(client, { activeTripId, userId, womenOnly }) {
+  if (!activeTripId) {
+    return;
+  }
+
+  const userResult = await client.query(
+    `
+      select gender
+      from users
+      where id = $1
+      limit 1
+    `,
+    [userId]
+  );
+  const riderGender = userResult.rows[0]?.gender || 'unspecified';
+
+  if (womenOnly && riderGender !== 'female') {
+    throw buildStatusError('Women-only rides are available only after setting your profile gender to female.', 403);
+  }
+
+  const compatibilityResult = await client.query(
+    `
+      select
+        driver_user.gender as driver_gender,
+        exists (
+          select 1
+          from bookings existing_booking
+          join ride_requests existing_request on existing_request.id = existing_booking.ride_request_id
+          left join users existing_rider on existing_rider.id = existing_request.rider_id
+          where existing_booking.active_trip_id = at.id
+            and existing_booking.booking_status not in ('cancelled')
+            and coalesce(existing_rider.gender, 'unspecified') <> 'female'
+        ) as has_non_female_rider,
+        exists (
+          select 1
+          from bookings existing_booking
+          join ride_requests existing_request on existing_request.id = existing_booking.ride_request_id
+          where existing_booking.active_trip_id = at.id
+            and existing_booking.booking_status not in ('cancelled')
+            and existing_request.women_only = true
+        ) as has_women_only_booking
+      from active_trips at
+      join drivers d on d.id = at.driver_id
+      join users driver_user on driver_user.id = d.user_id
+      where at.id = $1
+      limit 1
+    `,
+    [activeTripId]
+  );
+
+  const compatibility = compatibilityResult.rows[0];
+
+  if (!compatibility) {
+    throw buildStatusError('Selected trip is no longer available.', 404);
+  }
+
+  if (womenOnly && compatibility.driver_gender !== 'female') {
+    throw buildStatusError('Women-only rides require a female driver.', 409);
+  }
+
+  if (womenOnly && compatibility.has_non_female_rider) {
+    throw buildStatusError('Women-only rides can only be pooled with female co-passengers.', 409);
+  }
+
+  if (!womenOnly && compatibility.has_women_only_booking) {
+    throw buildStatusError('This trip is reserved for women-only pooled rides.', 409);
+  }
 }
 
 async function initializeTripLocation(client, tripId, routeGeometry) {
@@ -886,6 +962,12 @@ async function confirmBooking({ request, match, quote, options = {}, userId }) {
     const seatsRequired = Math.max(Number(request?.seatsRequired || rideRequest.seats_required || 1), 1);
 
     if (activeTrip) {
+      await assertTripSafetyCompatibility(client, {
+        activeTripId: activeTrip.id,
+        userId,
+        womenOnly: Boolean(rideRequest.women_only),
+      });
+
       const seatReservation = await client.query(
         `
           update active_trips

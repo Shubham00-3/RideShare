@@ -76,6 +76,7 @@ async function getProfile(userId) {
             full_name,
             phone,
             email,
+            gender,
             role,
             rating
           from users
@@ -151,6 +152,7 @@ async function getProfile(userId) {
     },
     user: {
       email: user.email || '',
+      gender: user.gender || 'unspecified',
       id: user.id,
       name: user.full_name,
       phone: user.phone,
@@ -168,9 +170,15 @@ async function updateProfile(userId, payload = {}) {
 
   const fullName = String(payload.name || '').trim();
   const email = payload.email == null ? null : String(payload.email).trim();
+  const gender = String(payload.gender || 'unspecified').trim();
+  const allowedGenders = ['female', 'male', 'non_binary', 'unspecified'];
 
   if (!fullName) {
     throw buildStatusError('A profile name is required.', 400);
+  }
+
+  if (!allowedGenders.includes(gender)) {
+    throw buildStatusError('Choose a valid gender option.', 400);
   }
 
   await db.query(
@@ -178,10 +186,11 @@ async function updateProfile(userId, payload = {}) {
       update users
       set
         full_name = $2,
-        email = $3
+        email = $3,
+        gender = $4
       where id = $1
     `,
-    [userId, fullName, email || null]
+    [userId, fullName, email || null, gender]
   );
 
   return getProfile(userId);

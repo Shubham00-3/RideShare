@@ -15,6 +15,7 @@ create table if not exists users (
   full_name text not null,
   phone text not null unique,
   email text unique,
+  gender text not null default 'unspecified' check (gender in ('female', 'male', 'non_binary', 'unspecified')),
   role text not null check (role in ('rider', 'driver', 'admin')),
   rating numeric(3,2) not null default 5.0,
   created_at timestamptz not null default now()
@@ -64,6 +65,7 @@ create table if not exists ride_requests (
   ride_type text not null,
   seats_required integer not null default 1,
   allow_mid_trip_pickup boolean not null default true,
+  women_only boolean not null default false,
   departure_time timestamptz not null,
   status text not null default 'searching',
   created_at timestamptz not null default now()
@@ -253,7 +255,11 @@ alter table ride_requests
   add column if not exists dropoff_lng numeric(10,6),
   add column if not exists route_distance_meters integer,
   add column if not exists route_duration_seconds integer,
-  add column if not exists route_geometry jsonb;
+  add column if not exists route_geometry jsonb,
+  add column if not exists women_only boolean not null default false;
+
+alter table users
+  add column if not exists gender text not null default 'unspecified';
 
 create index if not exists idx_saved_places_user on saved_places(user_id);
 create index if not exists idx_emergency_contacts_user on emergency_contacts(user_id);

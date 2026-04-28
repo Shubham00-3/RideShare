@@ -130,6 +130,7 @@ describe('bookingService', () => {
               rider_id: 'rider-1',
               status: 'searching',
               seats_required: 1,
+              women_only: false,
             },
           ],
         })
@@ -145,6 +146,22 @@ describe('bookingService', () => {
               route_duration_seconds: 1100,
               current_lat: null,
               current_lng: null,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              gender: 'female',
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              driver_gender: 'female',
+              has_non_female_rider: false,
+              has_women_only_booking: false,
             },
           ],
         })

@@ -1,12 +1,15 @@
-insert into users (id, full_name, phone, email, role, rating)
+insert into users (id, full_name, phone, email, gender, role, rating)
 values
-  ('44444444-4444-4444-4444-444444444444', 'Shubham Gangwar', '+919876543210', 'shubham@rideshare.in', 'rider', 4.80),
-  ('55555555-5555-5555-5555-555555555555', 'Riya Verma', '+919876543211', 'riya@rideshare.in', 'rider', 4.90),
-  ('66666666-6666-6666-6666-666666666666', 'Neha Arora', '+919876543212', 'neha@rideshare.in', 'rider', 4.70),
-  ('77777777-7777-7777-7777-777777777777', 'Vikram Patel', '+919999900004', 'vikram@rideshare.in', 'driver', 4.85),
-  ('88888888-8888-8888-8888-888888888888', 'Sonal Mehta', '+919999900005', 'sonal@rideshare.in', 'driver', 4.92),
-  ('99999999-9999-9999-9999-999999999999', 'Ops Admin', '+919999900006', 'ops@rideshare.in', 'admin', 5.00)
-on conflict (id) do nothing;
+  ('44444444-4444-4444-4444-444444444444', 'Shubham Gangwar', '+919876543210', 'shubham@rideshare.in', 'male', 'rider', 4.80),
+  ('55555555-5555-5555-5555-555555555555', 'Riya Verma', '+919876543211', 'riya@rideshare.in', 'female', 'rider', 4.90),
+  ('66666666-6666-6666-6666-666666666666', 'Neha Arora', '+919876543212', 'neha@rideshare.in', 'female', 'rider', 4.70),
+  ('77777777-7777-7777-7777-777777777777', 'Vikram Patel', '+919999900004', 'vikram@rideshare.in', 'male', 'driver', 4.85),
+  ('88888888-8888-8888-8888-888888888888', 'Sonal Mehta', '+919999900005', 'sonal@rideshare.in', 'female', 'driver', 4.92),
+  ('99999999-9999-9999-9999-999999999999', 'Ops Admin', '+919999900006', 'ops@rideshare.in', 'unspecified', 'admin', 5.00)
+on conflict (id) do update
+set
+  gender = excluded.gender,
+  role = excluded.role;
 
 insert into saved_places (user_id, label, address, latitude, longitude, is_default)
 values

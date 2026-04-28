@@ -25,6 +25,7 @@ import {
 } from 'lucide-react-native';
 import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
 import { USER_PROFILE } from '../constants/data';
+import { useAuth } from '../context/AuthContext';
 import { useRide } from '../context/RideContext';
 import RouteMap from '../components/RouteMap';
 import { fetchRoutePreview, searchPlaces } from '../services/api';
@@ -214,6 +215,7 @@ function formatBookingStatus(status) {
 }
 
 export default function HomeScreen({ navigation }) {
+  const { user } = useAuth();
   const {
     activeBookingId,
     bookingHistory,
@@ -229,6 +231,7 @@ export default function HomeScreen({ navigation }) {
   const [scheduledDeparture, setScheduledDeparture] = useState(
     new Date(searchForm.departureTime)
   );
+  const [womenOnly, setWomenOnly] = useState(Boolean(searchForm.womenOnly));
   const [pickupLocation, setPickupLocation] = useState(searchForm.pickupLocation || null);
   const [dropoffLocation, setDropoffLocation] = useState(searchForm.dropoffLocation || null);
   const [pickupSuggestions, setPickupSuggestions] = useState([]);
@@ -240,6 +243,7 @@ export default function HomeScreen({ navigation }) {
     setPickup(searchForm.pickup);
     setDropoff(searchForm.dropoff);
     setSelectedType(searchForm.rideType);
+    setWomenOnly(Boolean(searchForm.womenOnly));
     setPickupLocation(searchForm.pickupLocation || null);
     setDropoffLocation(searchForm.dropoffLocation || null);
     setScheduledDeparture(new Date(searchForm.departureTime));
@@ -303,6 +307,7 @@ export default function HomeScreen({ navigation }) {
       return leftTime - rightTime;
     })
     .slice(0, 3);
+  const canUseWomenOnly = user?.gender === 'female';
 
   const resolveLocation = async (label, currentLocation, focusPoint) => {
     if (currentLocation?.label === label) {
@@ -349,6 +354,7 @@ export default function HomeScreen({ navigation }) {
         route,
         rideType: selectedType,
         allowMidTripPickup: selectedType !== 'solo',
+        womenOnly: canUseWomenOnly && selectedType !== 'solo' ? womenOnly : false,
         departureTime:
           selectedType === 'schedule'
             ? scheduledDeparture.toISOString()
@@ -537,6 +543,29 @@ export default function HomeScreen({ navigation }) {
             ))}
           </View>
         </ScrollView>
+
+        {canUseWomenOnly && selectedType !== 'solo' ? (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={[styles.safetyPreferenceCard, womenOnly && styles.safetyPreferenceCardActive]}
+            onPress={() => setWomenOnly((value) => !value)}
+          >
+            <View style={styles.safetyPreferenceIcon}>
+              <Shield size={20} color={womenOnly ? COLORS.textInverse : COLORS.primary} />
+            </View>
+            <View style={styles.safetyPreferenceCopy}>
+              <Text style={[styles.safetyPreferenceTitle, womenOnly && styles.safetyPreferenceTitleActive]}>
+                Women-only ride
+              </Text>
+              <Text style={[styles.safetyPreferenceText, womenOnly && styles.safetyPreferenceTextActive]}>
+                Match only with female drivers and female co-passengers.
+              </Text>
+            </View>
+            <View style={[styles.safetyToggle, womenOnly && styles.safetyToggleActive]}>
+              <View style={[styles.safetyToggleKnob, womenOnly && styles.safetyToggleKnobActive]} />
+            </View>
+          </TouchableOpacity>
+        ) : null}
 
         <View style={styles.strategyCard}>
           <Text style={styles.strategyTitle}>MVP corridor strategy</Text>
@@ -1237,6 +1266,69 @@ const styles = StyleSheet.create({
   scheduledTripsSection: {
     marginTop: 16,
     gap: 10,
+  },
+  safetyPreferenceCard: {
+    marginTop: 14,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    borderRadius: SIZES.radius_xl,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    ...SHADOWS.small,
+  },
+  safetyPreferenceCardActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  safetyPreferenceIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: `${COLORS.primary}14`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  safetyPreferenceCopy: {
+    flex: 1,
+  },
+  safetyPreferenceTitle: {
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
+  },
+  safetyPreferenceTitleActive: {
+    color: COLORS.textInverse,
+  },
+  safetyPreferenceText: {
+    color: COLORS.textSecondary,
+    marginTop: 3,
+    lineHeight: 19,
+    ...FONTS.regular,
+  },
+  safetyPreferenceTextActive: {
+    color: 'rgba(255,255,255,0.82)',
+  },
+  safetyToggle: {
+    width: 48,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.border,
+    padding: 3,
+    justifyContent: 'center',
+  },
+  safetyToggleActive: {
+    backgroundColor: 'rgba(255,255,255,0.28)',
+  },
+  safetyToggleKnob: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: COLORS.surface,
+  },
+  safetyToggleKnobActive: {
+    alignSelf: 'flex-end',
   },
   scheduledTripsHeader: {
     marginBottom: 2,

@@ -2,14 +2,17 @@ insert into corridors (id, label, city, direction, start_landmark, end_landmark)
 values
   ('delhi_cp_noida', 'Connaught Place -> East Delhi / Noida', 'Delhi-NCR', 'eastbound', 'Connaught Place', 'Noida Sector 15'),
   ('gurgaon_cp_central', 'Gurgaon -> Central Delhi', 'Delhi-NCR', 'northbound', 'Cyber Hub', 'Connaught Place')
-on conflict (id) do nothing;
+on conflict (id) do update
+set
+  gender = excluded.gender,
+  role = excluded.role;
 
-insert into users (id, full_name, phone, email, role, rating)
+insert into users (id, full_name, phone, email, gender, role, rating)
 values
-  ('11111111-1111-1111-1111-111111111111', 'Rajesh Kumar', '+919999900001', 'rajesh@rideshare.in', 'driver', 4.90),
-  ('22222222-2222-2222-2222-222222222222', 'Priya Malhotra', '+919999900002', 'priya@rideshare.in', 'driver', 4.80),
-  ('33333333-3333-3333-3333-333333333333', 'Amit Sharma', '+919999900003', 'amit@rideshare.in', 'driver', 4.70),
-  ('99999999-9999-9999-9999-999999999999', 'Ops Admin', '+919999900006', 'ops@rideshare.in', 'admin', 5.00)
+  ('11111111-1111-1111-1111-111111111111', 'Rajesh Kumar', '+919999900001', 'rajesh@rideshare.in', 'male', 'driver', 4.90),
+  ('22222222-2222-2222-2222-222222222222', 'Priya Malhotra', '+919999900002', 'priya@rideshare.in', 'female', 'driver', 4.80),
+  ('33333333-3333-3333-3333-333333333333', 'Amit Sharma', '+919999900003', 'amit@rideshare.in', 'male', 'driver', 4.70),
+  ('99999999-9999-9999-9999-999999999999', 'Ops Admin', '+919999900006', 'ops@rideshare.in', 'unspecified', 'admin', 5.00)
 on conflict (id) do nothing;
 
 insert into drivers (id, user_id, full_name, rating, trip_count, commission_percent, streak_count, return_trip_available)

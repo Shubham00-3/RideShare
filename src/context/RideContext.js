@@ -22,6 +22,7 @@ const DEFAULT_SEARCH = {
   rideType: 'shared',
   seatsRequired: 1,
   allowMidTripPickup: true,
+  womenOnly: false,
   departureTime: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
 };
 

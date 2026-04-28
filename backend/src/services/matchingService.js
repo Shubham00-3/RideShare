@@ -69,6 +69,7 @@ function buildRideRequest(payload) {
     rideType: payload.rideType || 'shared',
     seatsRequired: Number(payload.seatsRequired || 1),
     allowMidTripPickup: payload.allowMidTripPickup ?? true,
+    womenOnly: Boolean(payload.womenOnly),
     departureTime: payload.departureTime || new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     corridorId: corridor.corridorId,
     corridorLabel: corridor.corridorLabel,
@@ -123,10 +124,11 @@ async function persistRideRequest(request, options = {}) {
         ride_type,
         seats_required,
         allow_mid_trip_pickup,
+        women_only,
         departure_time,
         status
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, 'searching')
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18, 'searching')
       returning id
     `,
     [
@@ -146,6 +148,7 @@ async function persistRideRequest(request, options = {}) {
       request.rideType,
       request.seatsRequired,
       request.allowMidTripPickup,
+      request.womenOnly,
       request.departureTime,
     ]
   );
@@ -230,6 +233,7 @@ function vehicleVariants(candidate, overlapRatio) {
       farePerKm: `Rs. ${baseRatePerKm}/km`,
       driver: {
         name: candidate.driver_name,
+        gender: candidate.driver_gender || 'unspecified',
         rating: toNumber(candidate.driver_rating),
         trips: candidate.driver_trip_count,
       },
@@ -247,6 +251,7 @@ function vehicleVariants(candidate, overlapRatio) {
       farePerKm: `Rs. ${baseRatePerKm + 2}/km`,
       driver: {
         name: candidate.driver_name,
+        gender: candidate.driver_gender || 'unspecified',
         rating: toNumber(candidate.driver_rating),
         trips: candidate.driver_trip_count,
       },
@@ -286,10 +291,37 @@ function buildMatch(request, candidate) {
     detourMinutes: metrics.detourMinutes,
     score: metrics.score,
     vehicles: vehicleVariants(candidate, metrics.overlapRatio),
+    womenOnly: Boolean(request.womenOnly),
     driverPoolHeadline: candidate.allow_mid_trip_join
       ? 'Eligible for dynamic mid-trip pickup'
       : 'Locked direct ride with driver priority',
   };
+}
+
+async function getUserGender(userId) {
+  if (!userId) {
+    return null;
+  }
+
+  const result = await db.query(
+    `
+      select gender
+      from users
+      where id = $1
+      limit 1
+    `,
+    [userId]
+  );
+
+  return result.rows[0]?.gender || null;
+}
+
+function filterSeedCandidatesForSafety(request, candidates) {
+  if (request.womenOnly) {
+    return candidates.filter((candidate) => candidate.driver_gender === 'female');
+  }
+
+  return candidates.filter((candidate) => !candidate.women_only);
 }
 
 async function fetchCandidateRows(request) {
@@ -315,6 +347,7 @@ async function fetchCandidateRows(request) {
         d.full_name as driver_name,
         d.rating as driver_rating,
         d.trip_count as driver_trip_count,
+        driver_user.gender as driver_gender,
         v.display_name as vehicle_name,
         v.vehicle_type,
         v.category as vehicle_category,
@@ -323,16 +356,30 @@ async function fetchCandidateRows(request) {
       from active_trips t
       join corridors c on c.id = t.corridor_id
       join drivers d on d.id = t.driver_id
+      join users driver_user on driver_user.id = d.user_id
       join vehicles v on v.id = t.vehicle_id
       where t.status = 'open'
         and t.corridor_id = $1
         and c.direction = $2
         and t.available_seats >= $3
+        and ($4::boolean = false or driver_user.gender = 'female')
+        and not exists (
+          select 1
+          from bookings existing_booking
+          join ride_requests existing_request on existing_request.id = existing_booking.ride_request_id
+          left join users existing_rider on existing_rider.id = existing_request.rider_id
+          where existing_booking.active_trip_id = t.id
+            and existing_booking.booking_status not in ('cancelled')
+            and (
+              ($4::boolean = true and coalesce(existing_rider.gender, 'unspecified') <> 'female')
+              or ($4::boolean = false and existing_request.women_only = true)
+            )
+        )
     `,
-    [request.corridorId, request.direction, request.seatsRequired]
+    [request.corridorId, request.direction, request.seatsRequired, request.womenOnly]
   );
 
-  return result.rows.length > 0 ? result.rows : seedCandidates;
+  return result.rows.length > 0 ? result.rows : filterSeedCandidatesForSafety(request, seedCandidates);
 }
 
 async function previewMatches(payload, options = {}) {
@@ -348,6 +395,17 @@ async function previewMatches(payload, options = {}) {
     ...payload,
     route: routePreview,
   });
+
+  if (initialRequest.womenOnly) {
+    const userGender = await getUserGender(options.userId);
+
+    if (userGender !== 'female') {
+      const error = new Error('Women-only rides are available only after setting your profile gender to female.');
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+
   const request = await persistRideRequest(initialRequest, options);
   const candidates = await fetchCandidateRows(request);
   const requestWindowEnd = new Date(

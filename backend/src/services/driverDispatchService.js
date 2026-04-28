@@ -75,6 +75,7 @@ async function getDriverRecord(userId) {
         d.return_trip_available,
         d.rating,
         d.trip_count,
+        u.gender,
         u.phone,
         u.email
       from drivers d
@@ -110,11 +111,21 @@ async function getDriverOpenTrips(userId) {
         at.departure_window_start,
         at.departure_window_end,
         at.route_geometry,
+        driver_user.gender as driver_gender,
+        exists (
+          select 1
+          from bookings existing_booking
+          join ride_requests existing_request on existing_request.id = existing_booking.ride_request_id
+          where existing_booking.active_trip_id = at.id
+            and existing_booking.booking_status not in ('cancelled')
+            and existing_request.women_only = true
+        ) as has_women_only_booking,
         v.display_name as vehicle_name,
         v.vehicle_type,
         v.eta_minutes as vehicle_eta_minutes
       from active_trips at
       join drivers d on d.id = at.driver_id
+      join users driver_user on driver_user.id = d.user_id
       join vehicles v on v.id = at.vehicle_id
       where d.user_id = $1
         and at.status in ('open', 'in_progress')
@@ -171,11 +182,13 @@ async function getIncomingRequestsForDriver(userId) {
         rr.ride_type,
         rr.seats_required,
         rr.allow_mid_trip_pickup,
+        rr.women_only,
         rr.departure_time,
         rr.created_at,
         rr.route_geometry,
         rider.full_name as rider_name,
         rider.phone as rider_phone,
+        rider.gender as rider_gender,
         rr.corridor_id
       from ride_requests rr
       left join users rider on rider.id = rr.rider_id
@@ -194,7 +207,9 @@ async function getIncomingRequestsForDriver(userId) {
         .filter(
           (trip) =>
             trip.corridor_id === request.corridor_id &&
-            trip.available_seats >= request.seats_required
+            trip.available_seats >= request.seats_required &&
+            (!request.women_only || trip.driver_gender === 'female') &&
+            (request.women_only || !trip.has_women_only_booking)
         )
         .map((trip) => ({
           overlap: overlapScore(request, trip),
@@ -225,6 +240,7 @@ async function getIncomingRequestsForDriver(userId) {
         },
         rideType: request.ride_type,
         seatsRequired: request.seats_required,
+        womenOnly: Boolean(request.women_only),
         suggestedTrip: {
           etaMinutes: bestCandidate.trip.vehicle_eta_minutes,
           id: bestCandidate.trip.id,
@@ -250,6 +266,7 @@ async function getDriverDashboard(userId) {
           name: driver.full_name,
           phone: driver.phone,
           rating: toNumber(driver.rating),
+          gender: driver.gender || 'unspecified',
           returnTripAvailable: driver.return_trip_available,
           tripCount: toNumber(driver.trip_count),
         }
@@ -404,8 +421,11 @@ async function acceptIncomingRequest({ requestId, userId }) {
           rr.seats_required,
           rr.allow_mid_trip_pickup,
           rr.route_geometry,
+          rr.women_only,
+          rider.gender as rider_gender,
           rr.status
         from ride_requests rr
+        left join users rider on rider.id = rr.rider_id
         where rr.id = $1
         limit 1
       `,
@@ -454,9 +474,29 @@ async function acceptIncomingRequest({ requestId, userId }) {
           at.origin_km,
           at.destination_km,
           at.route_geometry,
+          driver_user.gender as driver_gender,
+          exists (
+            select 1
+            from bookings existing_booking
+            join ride_requests existing_request on existing_request.id = existing_booking.ride_request_id
+            left join users existing_rider on existing_rider.id = existing_request.rider_id
+            where existing_booking.active_trip_id = at.id
+              and existing_booking.booking_status not in ('cancelled')
+              and coalesce(existing_rider.gender, 'unspecified') <> 'female'
+          ) as has_non_female_rider,
+          exists (
+            select 1
+            from bookings existing_booking
+            join ride_requests existing_request on existing_request.id = existing_booking.ride_request_id
+            where existing_booking.active_trip_id = at.id
+              and existing_booking.booking_status not in ('cancelled')
+              and existing_request.women_only = true
+          ) as has_women_only_booking,
           v.eta_minutes as vehicle_eta_minutes
         from active_trips at
         join vehicles v on v.id = at.vehicle_id
+        join drivers d on d.id = at.driver_id
+        join users driver_user on driver_user.id = d.user_id
         where at.driver_id = $1
           and at.corridor_id = $2
           and at.status in ('open', 'in_progress')
@@ -471,11 +511,22 @@ async function acceptIncomingRequest({ requestId, userId }) {
         overlap: overlapScore(request, trip),
         trip,
       }))
+      .filter((candidate) => {
+        if (request.women_only) {
+          return candidate.trip.driver_gender === 'female' && !candidate.trip.has_non_female_rider;
+        }
+
+        return !candidate.trip.has_women_only_booking;
+      })
       .filter((candidate) => candidate.overlap.overlapRatio >= 0.35)
       .sort((left, right) => right.overlap.score - left.overlap.score)[0];
 
     if (!bestCandidate) {
       throw new Error('No compatible driver trip is available for this request right now.');
+    }
+
+    if (request.women_only && request.rider_gender !== 'female') {
+      throw buildStatusError('Women-only requests require a female rider profile.', 403);
     }
 
     const reservation = await client.query(

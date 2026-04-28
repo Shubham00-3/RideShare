@@ -47,12 +47,13 @@ const EMPTY_CONTACT = {
 };
 
 export default function ProfileScreen({ navigation }) {
-  const { signOut, token, user } = useAuth();
+  const { refreshSession, signOut, token, user } = useAuth();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileDraft, setProfileDraft] = useState({
     email: '',
+    gender: 'unspecified',
     name: '',
   });
   const [newPlace, setNewPlace] = useState(EMPTY_PLACE);
@@ -70,6 +71,7 @@ export default function ProfileScreen({ navigation }) {
       setProfile(payload);
       setProfileDraft({
         email: payload.user?.email || '',
+        gender: payload.user?.gender || 'unspecified',
         name: payload.user?.name || '',
       });
     } catch (error) {
@@ -107,13 +109,14 @@ export default function ProfileScreen({ navigation }) {
     try {
       const payload = await updateProfile(profileDraft, token);
       setProfile(payload);
+      await refreshSession().catch(() => null);
       Alert.alert('Profile saved', 'Your account details are up to date.');
     } catch (error) {
       Alert.alert('Unable to save profile', error.message || 'Try again shortly.');
     } finally {
       setSavingProfile(false);
     }
-  }, [profileDraft, token]);
+  }, [profileDraft, refreshSession, token]);
 
   const handlePreferenceToggle = useCallback(async (key, value) => {
     if (!token) {
@@ -277,6 +280,29 @@ export default function ProfileScreen({ navigation }) {
             value={profileDraft.email}
             onChangeText={(value) => setProfileDraft((previous) => ({ ...previous, email: value }))}
           />
+          <Text style={styles.fieldLabel}>Gender</Text>
+          <View style={styles.genderOptions}>
+            {[
+              ['female', 'Female'],
+              ['male', 'Male'],
+              ['non_binary', 'Non-binary'],
+              ['unspecified', 'Prefer not to say'],
+            ].map(([value, label]) => {
+              const isSelected = profileDraft.gender === value;
+
+              return (
+                <TouchableOpacity
+                  key={value}
+                  style={[styles.genderChip, isSelected && styles.genderChipActive]}
+                  onPress={() => setProfileDraft((previous) => ({ ...previous, gender: value }))}
+                >
+                  <Text style={[styles.genderChipText, isSelected && styles.genderChipTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           <TouchableOpacity style={styles.primaryButton} disabled={savingProfile} onPress={handleSaveProfile}>
             <Text style={styles.primaryButtonText}>
               {savingProfile ? 'Saving...' : 'Save profile'}
@@ -486,6 +512,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     ...FONTS.regular,
+  },
+  fieldLabel: {
+    color: COLORS.textSecondary,
+    marginTop: 14,
+    ...FONTS.semiBold,
+  },
+  genderOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  genderChip: {
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radius_full,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  genderChipActive: {
+    backgroundColor: COLORS.primary,
+  },
+  genderChipText: {
+    color: COLORS.textSecondary,
+    fontSize: SIZES.sm,
+    ...FONTS.medium,
+  },
+  genderChipTextActive: {
+    color: COLORS.textInverse,
   },
   primaryButton: {
     alignItems: 'center',

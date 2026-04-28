@@ -143,4 +143,77 @@ describe('matchingService', () => {
 
     expect(result.matches[0].overlapSource).toBe('corridor');
   });
+
+  test('women-only searches require a female rider and female driver matches', async () => {
+    db.query
+      .mockResolvedValueOnce({ rows: [{ gender: 'female' }] })
+      .mockResolvedValueOnce({ rows: [{ id: 'ride-request-3' }] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'trip_corridor_2',
+            corridor_id: 'delhi_cp_noida',
+            corridor_label: 'Connaught Place -> East Delhi / Noida',
+            direction: 'eastbound',
+            origin_label: 'India Gate, New Delhi',
+            destination_label: 'Akshardham Temple, Delhi',
+            origin_km: 0,
+            destination_km: 15,
+            departure_window_start: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+            departure_window_end: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            base_solo_fare: 500,
+            available_seats: 2,
+            allow_mid_trip_join: true,
+            driver_gender: 'female',
+            driver_name: 'Priya',
+            driver_rating: 4.9,
+            driver_trip_count: 900,
+            route_geometry: requestGeometry,
+            vehicle_category: 'eco',
+            vehicle_eta_minutes: 4,
+            vehicle_name: 'Tata Nexon EV',
+            vehicle_rate_per_km: 9,
+            vehicle_type: 'ECO',
+          },
+        ],
+      });
+
+    const result = await previewMatches(
+      {
+        dropoff: 'Akshardham Temple, Delhi',
+        pickup: 'Connaught Place, New Delhi',
+        route: {
+          distanceKm: 9.4,
+          durationSeconds: 1100,
+          geometry: requestGeometry,
+        },
+        womenOnly: true,
+      },
+      {
+        userId: 'rider-1',
+      }
+    );
+
+    expect(result.request.womenOnly).toBe(true);
+    expect(result.matches[0].vehicles[0].driver.gender).toBe('female');
+  });
+
+  test('rejects women-only searches for non-female rider profiles', async () => {
+    db.query.mockResolvedValueOnce({ rows: [{ gender: 'male' }] });
+
+    await expect(
+      previewMatches(
+        {
+          dropoff: 'Akshardham Temple, Delhi',
+          pickup: 'Connaught Place, New Delhi',
+          womenOnly: true,
+        },
+        {
+          userId: 'rider-1',
+        }
+      )
+    ).rejects.toMatchObject({
+      statusCode: 403,
+    });
+  });
 });
