@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "schema:apply": "node scripts/apply-schema.js",
     "seed:dummy": "node scripts/seed-dummy-data.js",
     "reset:demo": "node scripts/reset-demo-data.js",
     "sync:routes": "node scripts/sync-active-trip-routes.js",

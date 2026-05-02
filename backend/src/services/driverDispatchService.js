@@ -72,10 +72,12 @@ async function getDriverRecord(userId) {
         d.full_name,
         d.is_online,
         d.return_trip_available,
+        d.female_passengers_only,
         d.rating,
         d.trip_count,
         u.phone,
-        u.email
+        u.email,
+        u.gender
       from drivers d
       join users u on u.id = d.user_id
       where d.user_id = $1
@@ -170,11 +172,14 @@ async function getIncomingRequestsForDriver(userId) {
         rr.ride_type,
         rr.seats_required,
         rr.allow_mid_trip_pickup,
+        rr.female_driver_only,
+        rr.female_copassengers_only,
         rr.departure_time,
         rr.created_at,
         rr.route_geometry,
         rider.full_name as rider_name,
         rider.phone as rider_phone,
+        rider.gender as rider_gender,
         rr.corridor_id
       from ride_requests rr
       left join users rider on rider.id = rr.rider_id
@@ -189,6 +194,14 @@ async function getIncomingRequestsForDriver(userId) {
 
   return result.rows
     .map((request) => {
+      if (request.female_driver_only && driver.gender !== 'female') {
+        return null;
+      }
+
+      if (driver.female_passengers_only && request.rider_gender !== 'female') {
+        return null;
+      }
+
       const compatibleTrips = openTrips
         .filter(
           (trip) =>
@@ -222,6 +235,10 @@ async function getIncomingRequestsForDriver(userId) {
           name: request.rider_name || 'Nearby rider',
           phone: request.rider_phone || null,
         },
+        safetyPreferences: {
+          femaleCopassengersOnly: Boolean(request.female_copassengers_only),
+          femaleDriverOnly: Boolean(request.female_driver_only),
+        },
         rideType: request.ride_type,
         seatsRequired: request.seats_required,
         suggestedTrip: {
@@ -246,6 +263,8 @@ async function getDriverDashboard(userId) {
       ? {
           email: driver.email,
           isOnline: driver.is_online,
+          gender: driver.gender,
+          femalePassengersOnly: driver.female_passengers_only,
           name: driver.full_name,
           phone: driver.phone,
           rating: toNumber(driver.rating),
@@ -281,16 +300,26 @@ async function updateDriverAvailability(userId, payload = {}) {
     typeof payload.returnTripAvailable === 'boolean'
       ? payload.returnTripAvailable
       : current.return_trip_available;
+  const wantsFemalePassengersOnly =
+    typeof payload.femalePassengersOnly === 'boolean';
+  const nextFemalePassengersOnly = wantsFemalePassengersOnly
+    ? payload.femalePassengersOnly
+    : current.female_passengers_only;
+
+  if (wantsFemalePassengersOnly && current.gender !== 'female') {
+    throw buildStatusError('Only female drivers can choose female passengers only.', 403);
+  }
 
   await db.query(
     `
       update drivers
       set
         is_online = $2,
-        return_trip_available = $3
+        return_trip_available = $3,
+        female_passengers_only = $4
       where user_id = $1
     `,
-    [userId, nextIsOnline, nextReturnTrip]
+    [userId, nextIsOnline, nextReturnTrip, nextFemalePassengersOnly]
   );
 
   return getDriverDashboard(userId);
@@ -370,8 +399,10 @@ async function acceptIncomingRequest({ requestId, userId }) {
         select
           d.id,
           d.full_name,
-          d.is_online
+          d.is_online,
+          u.gender
         from drivers d
+        join users u on u.id = d.user_id
         where d.user_id = $1
         limit 1
       `,
@@ -400,9 +431,13 @@ async function acceptIncomingRequest({ requestId, userId }) {
           rr.ride_type,
           rr.seats_required,
           rr.allow_mid_trip_pickup,
+          rr.female_driver_only,
+          rr.female_copassengers_only,
           rr.route_geometry,
-          rr.status
+          rr.status,
+          rider.gender as rider_gender
         from ride_requests rr
+        left join users rider on rider.id = rr.rider_id
         where rr.id = $1
         limit 1
       `,
@@ -438,6 +473,14 @@ async function acceptIncomingRequest({ requestId, userId }) {
       throw new Error('This rider request has already been assigned.');
     }
 
+    if (request.female_driver_only && driver.gender !== 'female') {
+      throw buildStatusError('This rider requested a female driver.', 403);
+    }
+
+    if (driver.female_passengers_only && request.rider_gender !== 'female') {
+      throw buildStatusError('This driver accepts female passengers only.', 403);
+    }
+
     const tripResult = await client.query(
       `
         select
@@ -471,6 +514,26 @@ async function acceptIncomingRequest({ requestId, userId }) {
 
     if (!bestCandidate) {
       throw new Error('No compatible driver trip is available for this request right now.');
+    }
+
+    if (request.female_copassengers_only) {
+      const nonFemalePassengers = await client.query(
+        `
+          select 1
+          from bookings b
+          join ride_requests rr on rr.id = b.ride_request_id
+          join users rider on rider.id = rr.rider_id
+          where b.active_trip_id = $1
+            and b.booking_status not in ('cancelled', 'completed')
+            and coalesce(rider.gender, '') <> 'female'
+          limit 1
+        `,
+        [bestCandidate.trip.id]
+      );
+
+      if (nonFemalePassengers.rows[0]) {
+        throw buildStatusError('This rider requested female co-passengers only.', 409);
+      }
     }
 
     const reservation = await client.query(

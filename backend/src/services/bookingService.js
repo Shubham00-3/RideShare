@@ -385,8 +385,20 @@ async function fetchActiveTripSnapshot(client, tripId) {
         t.route_distance_meters,
         t.route_duration_seconds,
         t.current_lat,
-        t.current_lng
+        t.current_lng,
+        driver_user.gender as driver_gender,
+        exists (
+          select 1
+          from bookings existing_booking
+          join ride_requests existing_request on existing_request.id = existing_booking.ride_request_id
+          join users existing_rider on existing_rider.id = existing_request.rider_id
+          where existing_booking.active_trip_id = t.id
+            and existing_booking.booking_status not in ('cancelled', 'completed')
+            and coalesce(existing_rider.gender, '') <> 'female'
+        ) as has_non_female_copassenger
       from active_trips t
+      join drivers d on d.id = t.driver_id
+      join users driver_user on driver_user.id = d.user_id
       where t.id = $1
       limit 1
     `,
@@ -402,7 +414,9 @@ async function ensureRideRequestOwnership(client, rideRequestId, userId) {
       select
         id,
         rider_id,
-        status
+        status,
+        female_driver_only,
+        female_copassengers_only
       from ride_requests
       where id = $1
       limit 1
@@ -432,6 +446,34 @@ async function ensureRideRequestOwnership(client, rideRequestId, userId) {
   }
 
   return rideRequest;
+}
+
+async function ensureStoredPaymentMethod(client, paymentMethodId, userId) {
+  const normalizedPaymentMethodId = String(paymentMethodId || '').trim();
+
+  if (!normalizedPaymentMethodId) {
+    throw buildStatusError('Select a saved payment method before booking.', 400);
+  }
+
+  if (!isUuid(normalizedPaymentMethodId)) {
+    throw buildStatusError('Selected payment method was not found.', 400);
+  }
+
+  const result = await client.query(
+    `
+      select id
+      from payment_methods
+      where id = $1 and user_id = $2
+      limit 1
+    `,
+    [normalizedPaymentMethodId, userId]
+  );
+
+  if (!result.rows[0]) {
+    throw buildStatusError('Selected payment method was not found.', 400);
+  }
+
+  return result.rows[0].id;
 }
 
 async function initializeTripLocation(client, tripId, routeGeometry) {
@@ -865,10 +907,19 @@ async function confirmBooking({ request, match, quote, options = {}, userId }) {
       });
     }
 
+    const paymentMethod = await ensureStoredPaymentMethod(client, options.paymentMethod, userId);
     const activeTrip = await fetchActiveTripSnapshot(client, match?.id);
     const seatsRequired = Math.max(Number(request?.seatsRequired || rideRequest.seats_required || 1), 1);
 
     if (activeTrip) {
+      if (rideRequest.female_driver_only && activeTrip.driver_gender !== 'female') {
+        throw buildStatusError('Selected trip does not have a female driver.', 409);
+      }
+
+      if (rideRequest.female_copassengers_only && activeTrip.has_non_female_copassenger) {
+        throw buildStatusError('Selected trip has a co-passenger outside your preference.', 409);
+      }
+
       const seatReservation = await client.query(
         `
           update active_trips
@@ -888,7 +939,6 @@ async function confirmBooking({ request, match, quote, options = {}, userId }) {
     }
 
     const activeTripId = activeTrip?.id || null;
-    const paymentMethod = String(options.paymentMethod || 'upi');
     const insertBooking = await client.query(
       `
         insert into bookings (

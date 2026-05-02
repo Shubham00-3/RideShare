@@ -143,4 +143,215 @@ describe('matchingService', () => {
 
     expect(result.matches[0].overlapSource).toBe('corridor');
   });
+
+  test('filters matches by female driver and co-passenger preferences', async () => {
+    db.query
+      .mockResolvedValueOnce({ rows: [{ id: 'ride-request-3' }] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'trip_corridor_1',
+            corridor_id: 'delhi_cp_noida',
+            corridor_label: 'Connaught Place -> East Delhi / Noida',
+            direction: 'eastbound',
+            origin_label: 'Rajiv Chowk Metro',
+            destination_label: 'Noida Sector 15',
+            origin_km: 1,
+            destination_km: 15,
+            departure_window_start: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+            departure_window_end: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            base_solo_fare: 500,
+            available_seats: 2,
+            allow_mid_trip_join: true,
+            route_geometry: requestGeometry,
+            driver_gender: 'male',
+            has_non_female_copassenger: false,
+            vehicle_eta_minutes: 3,
+            driver_name: 'Rajesh',
+            driver_rating: 4.9,
+            driver_trip_count: 900,
+            vehicle_name: 'Swift',
+            vehicle_type: 'Economy',
+            vehicle_category: 'economy',
+            vehicle_rate_per_km: 8,
+          },
+          {
+            id: 'trip_corridor_2',
+            corridor_id: 'delhi_cp_noida',
+            corridor_label: 'Connaught Place -> East Delhi / Noida',
+            direction: 'eastbound',
+            origin_label: 'India Gate',
+            destination_label: 'Akshardham',
+            origin_km: 1,
+            destination_km: 15,
+            departure_window_start: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+            departure_window_end: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            base_solo_fare: 470,
+            available_seats: 3,
+            allow_mid_trip_join: true,
+            route_geometry: requestGeometry,
+            driver_gender: 'female',
+            has_non_female_copassenger: false,
+            vehicle_eta_minutes: 4,
+            driver_name: 'Priya',
+            driver_rating: 4.8,
+            driver_trip_count: 860,
+            vehicle_name: 'Nexon EV',
+            vehicle_type: 'ECO',
+            vehicle_category: 'eco',
+            vehicle_rate_per_km: 9,
+          },
+        ],
+      });
+
+    const result = await previewMatches(
+      {
+        pickup: 'Connaught Place, New Delhi',
+        dropoff: 'Akshardham Temple, Delhi',
+        femaleCopassengersOnly: true,
+        femaleDriverOnly: true,
+        pickupLocation: {
+          label: 'Connaught Place, New Delhi',
+          coordinates: {
+            latitude: 28.6315,
+            longitude: 77.2167,
+          },
+        },
+        dropoffLocation: {
+          label: 'Akshardham Temple, Delhi',
+          coordinates: {
+            latitude: 28.6127,
+            longitude: 77.2773,
+          },
+        },
+        route: {
+          distanceKm: 9.4,
+          durationSeconds: 1100,
+          geometry: requestGeometry,
+        },
+      },
+      {
+        userGender: 'female',
+        userRole: 'rider',
+      }
+    );
+
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0].id).toBe('trip_corridor_2');
+    expect(result.matches[0].vehicles[0].driver.gender).toBe('female');
+  });
+
+  test('returns empty matches when no active trips exist', async () => {
+    db.query
+      .mockResolvedValueOnce({ rows: [{ id: 'ride-request-empty' }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const result = await previewMatches({
+      pickup: 'Connaught Place, New Delhi',
+      dropoff: 'Akshardham Temple, Delhi',
+      pickupLocation: {
+        label: 'Connaught Place, New Delhi',
+        coordinates: {
+          latitude: 28.6315,
+          longitude: 77.2167,
+        },
+      },
+      dropoffLocation: {
+        label: 'Akshardham Temple, Delhi',
+        coordinates: {
+          latitude: 28.6127,
+          longitude: 77.2773,
+        },
+      },
+      route: {
+        distanceKm: 9.4,
+        durationSeconds: 1100,
+        geometry: requestGeometry,
+      },
+    });
+
+    expect(result.matches).toEqual([]);
+    expect(result.source).toBe('empty');
+  });
+
+  test('rejects women-only preferences for non-female riders', async () => {
+    db.query.mockResolvedValueOnce({
+      rows: [
+        {
+          gender: 'male',
+        },
+      ],
+    });
+
+    await expect(
+      previewMatches(
+        {
+          pickup: 'Connaught Place, New Delhi',
+          dropoff: 'Akshardham Temple, Delhi',
+          femaleDriverOnly: true,
+          pickupLocation: {
+            label: 'Connaught Place, New Delhi',
+            coordinates: {
+              latitude: 28.6315,
+              longitude: 77.2167,
+            },
+          },
+          dropoffLocation: {
+            label: 'Akshardham Temple, Delhi',
+            coordinates: {
+              latitude: 28.6127,
+              longitude: 77.2773,
+            },
+          },
+          route: {
+            distanceKm: 9.4,
+            durationSeconds: 1100,
+            geometry: requestGeometry,
+          },
+        },
+        {
+          userId: 'male-rider-1',
+        }
+      )
+    ).rejects.toMatchObject({
+      statusCode: 403,
+    });
+  });
+
+  test('rejects women-only rider preferences for female driver accounts', async () => {
+    await expect(
+      previewMatches(
+        {
+          pickup: 'Connaught Place, New Delhi',
+          dropoff: 'Akshardham Temple, Delhi',
+          femaleDriverOnly: true,
+          pickupLocation: {
+            label: 'Connaught Place, New Delhi',
+            coordinates: {
+              latitude: 28.6315,
+              longitude: 77.2167,
+            },
+          },
+          dropoffLocation: {
+            label: 'Akshardham Temple, Delhi',
+            coordinates: {
+              latitude: 28.6127,
+              longitude: 77.2773,
+            },
+          },
+          route: {
+            distanceKm: 9.4,
+            durationSeconds: 1100,
+            geometry: requestGeometry,
+          },
+        },
+        {
+          userGender: 'female',
+          userRole: 'driver',
+        }
+      )
+    ).rejects.toMatchObject({
+      statusCode: 403,
+    });
+  });
 });

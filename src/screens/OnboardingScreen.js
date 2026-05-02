@@ -145,6 +145,8 @@ const styles = StyleSheet.create({
     borderRadius: SIZES.radius_xl,
     overflow: 'hidden',
     marginTop: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   image: {
     width: '100%',
@@ -188,16 +190,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.4)',
   },
   nextButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: COLORS.textInverse,
     paddingVertical: 16,
     paddingHorizontal: 60,
-    borderRadius: SIZES.radius_lg,
+    borderRadius: SIZES.radius_full,
     marginTop: 25,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
   },
   nextButtonText: {
-    color: COLORS.textInverse,
+    color: COLORS.brandInk,
     fontSize: SIZES.xl,
     ...FONTS.semiBold,
   },

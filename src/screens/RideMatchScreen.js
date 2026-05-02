@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   header: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.brandInk,
     paddingTop: 60,
     paddingBottom: 22,
     paddingHorizontal: 20,
@@ -192,6 +192,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderLight,
     ...SHADOWS.small,
   },
   routeInfo: {
@@ -246,7 +248,9 @@ const styles = StyleSheet.create({
     borderRadius: SIZES.radius_xl,
     padding: 16,
     marginBottom: 14,
-    ...SHADOWS.small,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    ...SHADOWS.medium,
   },
   passengerRow: {
     flexDirection: 'row',
@@ -311,7 +315,7 @@ const styles = StyleSheet.create({
   },
   routeDetailCard: {
     borderRadius: SIZES.radius_lg,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.surfaceSoft,
     padding: 14,
     marginTop: 14,
   },
@@ -336,9 +340,11 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     flex: 1,
-    backgroundColor: '#F8FAFF',
+    backgroundColor: '#F8FBFF',
     borderRadius: SIZES.radius_lg,
     padding: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
   },
   metricValue: {
     color: COLORS.textPrimary,
@@ -370,7 +376,7 @@ const styles = StyleSheet.create({
   },
   selectButton: {
     borderRadius: SIZES.radius_lg,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.brandInk,
     paddingHorizontal: 16,
     paddingVertical: 12,
     flexDirection: 'row',

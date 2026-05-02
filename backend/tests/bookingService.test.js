@@ -11,7 +11,7 @@ const bookingRow = {
   booking_status: 'confirmed',
   quoted_total: 320,
   shared_savings: 140,
-  payment_method: 'upi',
+  payment_method: '22222222-2222-4222-8222-222222222222',
   booking_created_at: new Date().toISOString(),
   ride_request_id: 'ride-request-1',
   rider_id: 'rider-1',
@@ -111,6 +111,9 @@ describe('bookingService', () => {
             estimatedSavings: 140,
           },
         },
+        options: {
+          paymentMethod: '22222222-2222-4222-8222-222222222222',
+        },
         userId: 'rider-1',
       })
     ).rejects.toMatchObject({
@@ -134,6 +137,13 @@ describe('bookingService', () => {
           ],
         })
         .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: '22222222-2222-4222-8222-222222222222',
+            },
+          ],
+        })
         .mockResolvedValueOnce({
           rows: [
             {
@@ -171,16 +181,66 @@ describe('bookingService', () => {
       match: {
         id: 'trip_corridor_2',
       },
-      quote: {
-        totals: {
-          total: 320,
-          estimatedSavings: 140,
+        quote: {
+          totals: {
+            total: 320,
+            estimatedSavings: 140,
+          },
         },
-      },
-      userId: 'rider-1',
-    });
+        options: {
+          paymentMethod: '22222222-2222-4222-8222-222222222222',
+        },
+        userId: 'rider-1',
+      });
 
     expect(booking.bookingId).toBe('booking-1');
     expect(booking.trip.routeGeometry).toEqual(bookingRow.active_route_geometry);
+  });
+
+  test('rejects booking confirmation without a stored payment method', async () => {
+    const client = {
+      query: jest
+        .fn()
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({
+          rows: [
+            {
+              id: 'ride-request-1',
+              rider_id: 'rider-1',
+              status: 'searching',
+              seats_required: 1,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({}),
+      release: jest.fn(),
+    };
+
+    db.getPool.mockReturnValue({
+      connect: jest.fn().mockResolvedValue(client),
+    });
+
+    await expect(
+      confirmBooking({
+        request: {
+          id: '11111111-1111-4111-8111-111111111111',
+          seatsRequired: 1,
+        },
+        match: {
+          id: 'trip_corridor_2',
+        },
+        quote: {
+          totals: {
+            total: 320,
+            estimatedSavings: 140,
+          },
+        },
+        userId: 'rider-1',
+      })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+    });
   });
 });

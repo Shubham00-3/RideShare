@@ -10,7 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Shield, ArrowRight, CheckCircle } from 'lucide-react-native';
+import { Shield, ArrowRight, CheckCircle, Smartphone, Sparkles } from 'lucide-react-native';
 import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
 import { useAuth } from '../context/AuthContext';
 
@@ -91,22 +91,26 @@ export default function LoginScreen() {
     >
       <View style={styles.header}>
         <View style={styles.logoCircle}>
-          <Text style={styles.logoIcon}>Ride</Text>
+          <Sparkles size={30} color={COLORS.textInverse} />
         </View>
         <Text style={styles.appName}>RideShare Connect</Text>
-        <Text style={styles.tagline}>Phone OTP sign-in backed by the API and database</Text>
+        <Text style={styles.tagline}>Smarter shared rides with safety-first matching</Text>
       </View>
 
       {step === 'phone' ? (
         <View style={styles.formContainer}>
-          <Text style={styles.formTitle}>Welcome!</Text>
+          <View style={styles.kicker}>
+            <Shield size={14} color={COLORS.primary} />
+            <Text style={styles.kickerText}>Secure phone login</Text>
+          </View>
+          <Text style={styles.formTitle}>Welcome back</Text>
           <Text style={styles.formSubtitle}>
-            Enter your mobile number to request a live OTP from the backend.
+            Enter your mobile number and we will get your ride profile ready.
           </Text>
 
           <View style={styles.phoneInputContainer}>
             <View style={styles.countryCode}>
-              <Text style={styles.flag}>IN</Text>
+              <Smartphone size={16} color={COLORS.primary} />
               <Text style={styles.codeText}>+91</Text>
             </View>
             <TextInput
@@ -141,7 +145,7 @@ export default function LoginScreen() {
           <View style={styles.infoRow}>
             <Shield size={16} color={COLORS.primary} />
             <Text style={styles.infoText}>
-              Your rider identity is now stored in the backend
+              Your trip preferences stay tied to your verified phone
             </Text>
           </View>
         </View>
@@ -219,7 +223,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   header: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.brandInk,
     paddingTop: 80,
     paddingBottom: 50,
     alignItems: 'center',
@@ -230,10 +234,12 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
   },
   logoIcon: {
     fontSize: 20,
@@ -247,7 +253,7 @@ const styles = StyleSheet.create({
   },
   tagline: {
     fontSize: SIZES.md,
-    color: 'rgba(255,255,255,0.8)',
+    color: 'rgba(255,255,255,0.76)',
     marginTop: 4,
     textAlign: 'center',
     paddingHorizontal: 28,
@@ -257,6 +263,22 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 24,
     paddingTop: 32,
+  },
+  kicker: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.surfaceSoft,
+    borderRadius: SIZES.radius_full,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 14,
+  },
+  kickerText: {
+    color: COLORS.primary,
+    fontSize: SIZES.sm,
+    ...FONTS.semiBold,
   },
   formTitle: {
     fontSize: SIZES.xxxl,
@@ -274,7 +296,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: SIZES.radius_lg,
+    borderRadius: SIZES.radius_xl,
     borderWidth: 1.5,
     borderColor: COLORS.border,
     overflow: 'hidden',
@@ -313,7 +335,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
-    borderRadius: SIZES.radius_lg,
+    borderRadius: SIZES.radius_xl,
     marginTop: 24,
     gap: 8,
     ...SHADOWS.medium,
@@ -365,9 +387,11 @@ const styles = StyleSheet.create({
   devOtpCard: {
     alignItems: 'center',
     marginTop: 22,
-    borderRadius: SIZES.radius_lg,
-    backgroundColor: '#F8FBFF',
+    borderRadius: SIZES.radius_xl,
+    backgroundColor: COLORS.surfaceSoft,
     paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: COLORS.brandMist,
   },
   devOtpLabel: {
     color: COLORS.textSecondary,

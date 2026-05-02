@@ -32,6 +32,7 @@ export default function ActiveTripScreen({ navigation }) {
   const {
     activeBookingId,
     activeBookingSource,
+    activeTripConnection,
     activeTrip,
     cancelBooking,
     loading,
@@ -47,7 +48,7 @@ export default function ActiveTripScreen({ navigation }) {
     : null;
 
   useEffect(() => {
-    if (!isBackendBackedTrip) {
+    if (!isBackendBackedTrip || activeTripConnection === 'streaming') {
       return undefined;
     }
 
@@ -63,7 +64,7 @@ export default function ActiveTripScreen({ navigation }) {
     return () => {
       clearInterval(interval);
     };
-  }, [isBackendBackedTrip, refreshActiveBooking]);
+  }, [activeTripConnection, isBackendBackedTrip, refreshActiveBooking]);
 
   useEffect(() => {
     if (isBackendBackedTrip || !activeTrip) {
@@ -131,9 +132,12 @@ export default function ActiveTripScreen({ navigation }) {
   const tripTitle =
     activeTrip.phaseLabel ||
     (activeTrip.status === 'completed' ? 'Trip completed' : 'Trip in progress');
-  const liveUpdateText = isBackendBackedTrip
-    ? `Live updates every ${LIVE_REFRESH_MS / 1000}s`
-    : 'Demo trip simulation';
+  const liveUpdateText =
+    activeTripConnection === 'streaming'
+      ? 'Live stream connected'
+      : isBackendBackedTrip
+        ? `Live fallback refresh every ${LIVE_REFRESH_MS / 1000}s`
+        : 'Demo trip simulation';
   const progressText = isScheduledRide
     ? `${etaLeft} min until pickup window`
     : `${Math.round(tripProgress * 100)}% complete`;

@@ -42,3 +42,9 @@ backend/.env
 # generated native folders and native build outputs
 /android
 /ios
+tmp-edge-profile
+tmp-edge-profile-2
+tmp-edge-profile-3
+/scripts
+/docs/.edge-pdf-profile
+.codex-pets

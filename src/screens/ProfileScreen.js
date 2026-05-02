@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   MapPin,
   CreditCard,
@@ -11,51 +12,117 @@ import {
   Shield,
   Crown,
   Bell,
-  Moon,
 } from 'lucide-react-native';
 import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
-import { USER_PROFILE } from '../constants/data';
 import { useAuth } from '../context/AuthContext';
+import { fetchProfileSummary } from '../services/api';
 
-export default function ProfileScreen() {
-  const { signOut, user } = useAuth();
+export default function ProfileScreen({ navigation }) {
+  const { signOut, token, user } = useAuth();
+  const [summary, setSummary] = useState(null);
+  const [summaryError, setSummaryError] = useState(null);
   const profile = {
-    ...USER_PROFILE,
-    name: user?.name || USER_PROFILE.name,
-    phone: user?.phone || USER_PROFILE.phone,
-    email: user?.email || USER_PROFILE.email,
-    rating: user?.rating || USER_PROFILE.rating,
+    name: user?.name || 'RideShare user',
+    phone: user?.phone || '',
+    email: user?.email || '',
+    rating: summary?.rating || user?.rating || 5,
+    role: summary?.role || user?.role || 'rider',
+    totalRides: summary?.totalRides || 0,
+    totalSavings: `Rs. ${Math.round(summary?.totalSavings || 0)}`,
+    savedPlacesCount: summary?.savedPlacesCount || 0,
+    emergencyContactsCount: summary?.emergencyContactsCount || 0,
+    primaryPaymentMethod: summary?.primaryPaymentMethod || 'None saved',
   };
+
+  const loadProfileSummary = React.useCallback(async () => {
+    if (!token) {
+      setSummary(null);
+      return;
+    }
+
+    setSummaryError(null);
+
+    try {
+      const payload = await fetchProfileSummary(token);
+      setSummary(payload);
+    } catch (error) {
+      setSummary(null);
+      setSummaryError(error.message || 'Unable to load profile summary.');
+    }
+  }, [token]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadInitialProfileSummary() {
+      if (!token) {
+        setSummary(null);
+        return;
+      }
+
+      setSummaryError(null);
+
+      try {
+        const payload = await fetchProfileSummary(token);
+
+        if (isMounted) {
+          setSummary(payload);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setSummary(null);
+          setSummaryError(error.message || 'Unable to load profile summary.');
+        }
+      }
+    }
+
+    loadInitialProfileSummary();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadProfileSummary();
+    }, [loadProfileSummary])
+  );
 
   const menuItems = [
     {
       icon: MapPin,
       label: 'Saved Places',
-      value: `${profile.savedPlaces.length} places`,
+      value: `${profile.savedPlacesCount} places`,
       color: COLORS.primary,
+      route: 'ProfileData',
+      params: { kind: 'savedPlaces' },
     },
     {
       icon: CreditCard,
       label: 'Payment Methods',
-      value: profile.paymentMethods[0].label,
+      value: profile.primaryPaymentMethod,
       color: COLORS.success,
+      route: 'ProfileData',
+      params: { kind: 'paymentMethods' },
     },
     {
       icon: Crown,
       label: 'Account Type',
-      value: user?.role || profile.subscription,
+      value: profile.role,
       color: COLORS.warning,
     },
     {
       icon: Shield,
       label: 'Emergency Contacts',
-      value: `${profile.emergencyContacts.length} contacts`,
+      value: `${profile.emergencyContactsCount} contacts`,
       color: COLORS.error,
+      route: 'ProfileData',
+      params: { kind: 'emergencyContacts' },
     },
+    { icon: Settings, label: 'Settings', value: 'Edit profile', color: COLORS.textSecondary, route: 'ProfileSettings' },
     { icon: Bell, label: 'Notifications', value: 'On', color: COLORS.accent },
-    { icon: Moon, label: 'Dark Mode', value: 'Off', color: '#6366F1' },
-    { icon: Settings, label: 'Settings', value: '', color: COLORS.textSecondary },
-    { icon: HelpCircle, label: 'Help & Support', value: '', color: COLORS.primary },
+    { icon: HelpCircle, label: 'Help & Support', value: 'Call 112 in emergencies', color: COLORS.primary },
   ];
 
   return (
@@ -78,7 +145,7 @@ export default function ProfileScreen() {
           <View style={[styles.badge, { backgroundColor: COLORS.warning + '15' }]}>
             <Crown size={12} color={COLORS.warning} />
             <Text style={[styles.badgeText, { color: COLORS.warning }]}>
-              {user?.role || profile.subscription}
+              {profile.role}
             </Text>
           </View>
         </View>
@@ -98,17 +165,24 @@ export default function ProfileScreen() {
       </View>
 
       <ScrollView style={styles.menuList} showsVerticalScrollIndicator={false}>
+        {summaryError ? <Text style={styles.errorText}>{summaryError}</Text> : null}
         {menuItems.map((item, index) => (
           <TouchableOpacity
             key={item.label}
             style={[styles.menuItem, index === menuItems.length - 1 && { borderBottomWidth: 0 }]}
+            onPress={() => {
+              if (item.route) {
+                navigation.navigate(item.route, item.params);
+              }
+            }}
+            disabled={!item.route}
           >
             <View style={[styles.menuIcon, { backgroundColor: item.color + '10' }]}>
               <item.icon size={18} color={item.color} />
             </View>
             <Text style={styles.menuLabel}>{item.label}</Text>
             {item.value ? <Text style={styles.menuValue}>{item.value}</Text> : null}
-            <ChevronRight size={16} color={COLORS.textTertiary} />
+            {item.route ? <ChevronRight size={16} color={COLORS.textTertiary} /> : null}
           </TouchableOpacity>
         ))}
         <TouchableOpacity style={styles.logoutBtn} onPress={signOut}>
@@ -123,7 +197,7 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  header: { backgroundColor: COLORS.primary, paddingTop: 60, paddingBottom: 30, alignItems: 'center' },
+  header: { backgroundColor: COLORS.brandInk, paddingTop: 60, paddingBottom: 34, alignItems: 'center' },
   avatarCircle: {
     width: 80,
     height: 80,
@@ -154,24 +228,36 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: SIZES.xs, color: '#FFF', ...FONTS.semiBold },
   statsRow: {
     flexDirection: 'row',
-    backgroundColor: '#FFF',
+    backgroundColor: COLORS.surface,
     marginHorizontal: 16,
     marginTop: -16,
-    borderRadius: 20,
+    borderRadius: SIZES.radius_xl,
     padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
     ...SHADOWS.medium,
   },
   statItem: { flex: 1, alignItems: 'center' },
   statVal: { fontSize: SIZES.xl, color: COLORS.textPrimary, ...FONTS.bold },
   statLabel: { fontSize: SIZES.xs, color: COLORS.textTertiary, ...FONTS.regular, marginTop: 4 },
   menuList: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
+  errorText: {
+    color: COLORS.error,
+    marginBottom: 12,
+    ...FONTS.medium,
+  },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 15,
+    paddingHorizontal: 12,
+    backgroundColor: COLORS.surface,
+    borderRadius: SIZES.radius_lg,
+    marginBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.borderLight,
+    borderBottomColor: 'transparent',
     gap: 12,
+    ...SHADOWS.small,
   },
   menuIcon: {
     width: 36,

@@ -163,6 +163,23 @@ function buildFallbackRoute({ pickup, dropoff }) {
   };
 }
 
+function logMappingFallback(provider, error) {
+  const message = error?.message || 'Unknown mapping provider error';
+  console.warn(`[mapping] ${provider} unavailable; using local fallback. ${message}`);
+}
+
+function assertFallbackAllowed(provider, error) {
+  if (env.allowMappingFallbacks) {
+    logMappingFallback(provider, error);
+    return;
+  }
+
+  const serviceError = new Error(`${provider} mapping provider is unavailable.`);
+  serviceError.statusCode = 503;
+  serviceError.cause = error;
+  throw serviceError;
+}
+
 function ensureCoordinatePayload(location, fallbackLabel) {
   const latitude = toNumber(location?.coordinates?.latitude ?? location?.latitude);
   const longitude = toNumber(location?.coordinates?.longitude ?? location?.longitude);
@@ -253,6 +270,7 @@ async function autocompletePlaces(query, options = {}) {
   }
 
   if (!env.peliasBaseUrl) {
+    assertFallbackAllowed('Pelias', new Error('PELIAS_BASE_URL is not configured.'));
     return findFallbackPlaces(trimmedQuery, options.focusPoint || null);
   }
 
@@ -276,7 +294,8 @@ async function autocompletePlaces(query, options = {}) {
     const places = parsePeliasFeatures(payload.features);
     const blended = blendAutocompleteResults(trimmedQuery, focusPoint, places);
     return blended.length > 0 ? blended : findFallbackPlaces(trimmedQuery, focusPoint);
-  } catch (_error) {
+  } catch (error) {
+    assertFallbackAllowed('Pelias', error);
     return findFallbackPlaces(trimmedQuery, focusPoint);
   }
 }
@@ -290,6 +309,7 @@ async function buildRoutePreview({ pickup, dropoff }) {
   }
 
   if (!env.valhallaBaseUrl) {
+    assertFallbackAllowed('Valhalla', new Error('VALHALLA_BASE_URL is not configured.'));
     return buildFallbackRoute({
       pickup: normalizedPickup,
       dropoff: normalizedDropoff,
@@ -334,7 +354,8 @@ async function buildRoutePreview({ pickup, dropoff }) {
       legs: routeResponse.trip?.legs || [],
       source: 'valhalla',
     };
-  } catch (_error) {
+  } catch (error) {
+    assertFallbackAllowed('Valhalla', error);
     return buildFallbackRoute({
       pickup: normalizedPickup,
       dropoff: normalizedDropoff,

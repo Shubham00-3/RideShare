@@ -7,6 +7,8 @@ const REQUEST_WINDOW_MS = 10 * 60 * 1000;
 const VERIFY_WINDOW_MS = 10 * 60 * 1000;
 const REQUEST_LIMIT = 3;
 const VERIFY_LIMIT = 5;
+const ALLOWED_GENDERS = new Set(['female', 'male', 'non_binary', 'prefer_not_to_say']);
+const ALLOWED_PROFILE_ROLES = new Set(['rider', 'driver']);
 const requestRateLimitStore = new Map();
 const verifyRateLimitStore = new Map();
 
@@ -37,6 +39,24 @@ function maskPhone(phone) {
   return `${normalized.slice(0, 3)} ${normalized.slice(3, 8)} ${normalized.slice(-4)}`;
 }
 
+function serializeDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  return String(value).slice(0, 10);
+}
+
+function validationError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+}
+
 function publicUser(row) {
   if (!row) {
     return null;
@@ -47,9 +67,68 @@ function publicUser(row) {
     name: row.full_name,
     phone: row.phone,
     email: row.email || null,
+    dateOfBirth: serializeDate(row.date_of_birth),
+    gender: row.gender || null,
+    profileComplete: Boolean(row.profile_completed_at),
     role: row.role,
     rating: Number(row.rating || 5),
   };
+}
+
+function normalizeName(name) {
+  const value = String(name || '').trim().replace(/\s+/g, ' ');
+
+  if (value.length < 2) {
+    throw validationError('Please enter your name.');
+  }
+
+  if (value.length > 80) {
+    throw validationError('Name must be 80 characters or less.');
+  }
+
+  return value;
+}
+
+function normalizeGender(gender) {
+  const value = String(gender || '').trim().toLowerCase();
+
+  if (!ALLOWED_GENDERS.has(value)) {
+    throw validationError('Please choose a valid gender option.');
+  }
+
+  return value;
+}
+
+function normalizeProfileRole(role) {
+  const value = String(role || 'rider').trim().toLowerCase();
+
+  if (!ALLOWED_PROFILE_ROLES.has(value)) {
+    throw validationError('Please choose rider or driver account type.');
+  }
+
+  return value;
+}
+
+function normalizeDateOfBirth(dateOfBirth) {
+  const value = String(dateOfBirth || '').trim();
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(parsed.getTime())) {
+    throw validationError('Please enter date of birth as YYYY-MM-DD.');
+  }
+
+  const today = new Date();
+  const minimumAgeDate = new Date(Date.UTC(
+    today.getUTCFullYear() - 18,
+    today.getUTCMonth(),
+    today.getUTCDate()
+  ));
+
+  if (parsed > minimumAgeDate) {
+    throw validationError('You must be at least 18 years old to use RideShare.');
+  }
+
+  return value;
 }
 
 function buildSessionPayload({ token, expiresAt, user, devOtp }) {
@@ -63,10 +142,11 @@ function buildSessionPayload({ token, expiresAt, user, devOtp }) {
 
 function enforceRateLimit(store, key, limit, windowMs, message) {
   const now = Date.now();
-  const current = store.get(key);
+  const storeKey = hashValue(key);
+  const current = store.get(storeKey);
 
   if (!current || current.expiresAt <= now) {
-    store.set(key, {
+    store.set(storeKey, {
       count: 1,
       expiresAt: now + windowMs,
     });
@@ -78,11 +158,21 @@ function enforceRateLimit(store, key, limit, windowMs, message) {
   }
 
   current.count += 1;
-  store.set(key, current);
+  store.set(storeKey, current);
 }
 
 function resetRateLimit(store, key) {
-  store.delete(key);
+  store.delete(hashValue(key));
+}
+
+function pruneRateLimitStore(store) {
+  const now = Date.now();
+
+  for (const [key, value] of store.entries()) {
+    if (value.expiresAt <= now) {
+      store.delete(key);
+    }
+  }
 }
 
 async function ensureRiderUser(client, phone) {
@@ -94,7 +184,10 @@ async function ensureRiderUser(client, phone) {
         phone,
         email,
         role,
-        rating
+        rating,
+        date_of_birth,
+        gender,
+        profile_completed_at
       from users
       where phone = $1
       limit 1
@@ -115,7 +208,7 @@ async function ensureRiderUser(client, phone) {
         role
       )
       values ($1, $2, 'rider')
-      returning id, full_name, phone, email, role, rating
+      returning id, full_name, phone, email, role, rating, date_of_birth, gender, profile_completed_at
     `,
     [`RideShare Rider ${suffix}`, phone]
   );
@@ -145,6 +238,85 @@ async function createSessionForUser(client, userId) {
   };
 }
 
+async function updateUserProfile(userId, payload = {}) {
+  const pool = db.getPool();
+
+  if (!pool) {
+    throw new Error('Database is required for profile updates.');
+  }
+
+  if (!userId) {
+    throw new Error('Authentication is required.');
+  }
+
+  const fullName = normalizeName(payload.name);
+  const dateOfBirth = normalizeDateOfBirth(payload.dateOfBirth);
+  const gender = normalizeGender(payload.gender);
+  const role = normalizeProfileRole(payload.role);
+  const client = await pool.connect();
+
+  try {
+    await client.query('begin');
+
+    const result = await client.query(
+      `
+        update users
+        set
+          full_name = $2,
+          date_of_birth = $3,
+          gender = $4,
+          role = $5,
+          profile_completed_at = now()
+        where id = $1
+        returning id, full_name, phone, email, role, rating, date_of_birth, gender, profile_completed_at
+      `,
+      [userId, fullName, dateOfBirth, gender, role]
+    );
+
+    if (!result.rows[0]) {
+      throw new Error('User profile not found.');
+    }
+
+    if (role === 'driver') {
+      await client.query(
+        `
+          update drivers
+          set full_name = $2
+          where user_id = $1
+        `,
+        [userId, fullName]
+      );
+      await client.query(
+        `
+          insert into drivers (
+            user_id,
+            full_name,
+            is_online
+          )
+          select $1, $2, false
+          where not exists (
+            select 1
+            from drivers
+            where user_id = $1
+          )
+        `,
+        [userId, fullName]
+      );
+    }
+
+    await client.query('commit');
+
+    return {
+      user: publicUser(result.rows[0]),
+    };
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function requestOtp(phone) {
   const pool = db.getPool();
 
@@ -153,6 +325,7 @@ async function requestOtp(phone) {
   }
 
   const normalizedPhone = normalizePhone(phone);
+  pruneRateLimitStore(requestRateLimitStore);
   enforceRateLimit(
     requestRateLimitStore,
     normalizedPhone,
@@ -169,7 +342,7 @@ async function requestOtp(phone) {
     const user = await ensureRiderUser(client, normalizedPhone);
 
     if (env.authExposeDevOtp) {
-      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const code = String(crypto.randomInt(100000, 1000000));
       const expiresAt = new Date(Date.now() + env.authOtpTtlMinutes * 60 * 1000);
 
       await client.query(
@@ -233,6 +406,7 @@ async function verifyOtp(phone, code) {
   }
 
   const normalizedPhone = normalizePhone(phone);
+  pruneRateLimitStore(verifyRateLimitStore);
   enforceRateLimit(
     verifyRateLimitStore,
     normalizedPhone,
@@ -262,7 +436,10 @@ async function verifyOtp(phone, code) {
             u.phone as user_phone,
             u.email,
             u.role,
-            u.rating
+            u.rating,
+            u.date_of_birth,
+            u.gender,
+            u.profile_completed_at
           from auth_otps o
           join users u on u.id = o.user_id
           where o.phone = $1
@@ -336,7 +513,10 @@ async function getSessionFromToken(token, options = {}) {
         u.phone,
         u.email,
         u.role,
-        u.rating
+        u.rating,
+        u.date_of_birth,
+        u.gender,
+        u.profile_completed_at
       from user_sessions s
       join users u on u.id = s.user_id
       where s.token_hash = $1
@@ -394,5 +574,6 @@ module.exports = {
   normalizePhone,
   requestOtp,
   revokeSession,
+  updateUserProfile,
   verifyOtp,
 };

@@ -6,6 +6,7 @@ const {
   getSessionFromToken,
   requestOtp,
   revokeSession,
+  updateUserProfile,
   verifyOtp,
 } = require('./services/authService');
 const {
@@ -27,12 +28,34 @@ const {
   getBookingsForUser,
   updateDriverBookingStatus,
 } = require('./services/bookingService');
+const {
+  createEmergencyContact,
+  createPaymentMethod,
+  createSavedPlace,
+  deleteEmergencyContact,
+  deletePaymentMethod,
+  deleteSavedPlace,
+  getProfileSummary,
+  listEmergencyContacts,
+  listPaymentMethods,
+  listSavedPlaces,
+  updateEmergencyContact,
+  updatePaymentMethod,
+  updateSavedPlace,
+} = require('./services/userDataService');
 const { assertStartupReadiness, getReadinessStatus } = require('./services/readinessService');
 
 const app = express();
 
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 app.use(cors({ origin: env.allowedOrigin }));
-app.use(express.json());
+app.use(express.json({ limit: env.jsonBodyLimit }));
 
 app.get('/health', (_req, res) => {
   const readiness = getReadinessStatus();
@@ -112,6 +135,7 @@ app.post('/api/ride-requests/preview-match', optionalAuth, async (req, res, next
   try {
     const response = await previewMatches(req.body || {}, {
       userId: req.auth?.user?.id || null,
+      userRole: req.auth?.user?.role || null,
     });
     res.json(response);
   } catch (error) {
@@ -162,6 +186,175 @@ app.get('/api/bookings/:id', requireAuth, async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+app.patch('/api/me/profile', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await updateUserProfile(req.auth.user.id, req.body || {});
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/me/profile-summary', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await getProfileSummary(req.auth.user.id);
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/me/saved-places', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await listSavedPlaces(req.auth.user.id);
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/me/saved-places', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await createSavedPlace(req.auth.user.id, req.body || {});
+    res.status(201).json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/me/saved-places/:id', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await updateSavedPlace(req.auth.user.id, req.params.id, req.body || {});
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/me/saved-places/:id', requireAuth, async (req, res, next) => {
+  try {
+    await deleteSavedPlace(req.auth.user.id, req.params.id);
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/me/payment-methods', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await listPaymentMethods(req.auth.user.id);
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/me/payment-methods', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await createPaymentMethod(req.auth.user.id, req.body || {});
+    res.status(201).json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/me/payment-methods/:id', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await updatePaymentMethod(req.auth.user.id, req.params.id, req.body || {});
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/me/payment-methods/:id', requireAuth, async (req, res, next) => {
+  try {
+    await deletePaymentMethod(req.auth.user.id, req.params.id);
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/me/emergency-contacts', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await listEmergencyContacts(req.auth.user.id);
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/me/emergency-contacts', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await createEmergencyContact(req.auth.user.id, req.body || {});
+    res.status(201).json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/me/emergency-contacts/:id', requireAuth, async (req, res, next) => {
+  try {
+    const payload = await updateEmergencyContact(req.auth.user.id, req.params.id, req.body || {});
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete('/api/me/emergency-contacts/:id', requireAuth, async (req, res, next) => {
+  try {
+    await deleteEmergencyContact(req.auth.user.id, req.params.id);
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/bookings/:id/stream', requireAuth, async (req, res) => {
+  const sendBooking = async () => {
+    const booking = await getBookingById(req.params.id, {
+      userId: req.auth.user.id,
+      userRole: req.auth.user.role,
+    });
+
+    if (!booking) {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: 'Booking not found' })}\n\n`);
+      return false;
+    }
+
+    res.write(`event: booking\ndata: ${JSON.stringify(booking)}\n\n`);
+    return true;
+  };
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    Connection: 'keep-alive',
+    'Cache-Control': 'no-cache, no-transform',
+  });
+  res.write(': connected\n\n');
+
+  const keepAlive = setInterval(() => {
+    res.write(': keep-alive\n\n');
+  }, 25000);
+  const interval = setInterval(() => {
+    sendBooking().catch((error) => {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
+    });
+  }, 5000);
+
+  req.on('close', () => {
+    clearInterval(interval);
+    clearInterval(keepAlive);
+    res.end();
+  });
+
+  sendBooking().catch((error) => {
+    res.write(`event: error\ndata: ${JSON.stringify({ message: error.message })}\n\n`);
+  });
 });
 
 app.get('/api/me/bookings', requireAuth, async (req, res, next) => {
@@ -299,10 +492,14 @@ app.use((error, _req, res, _next) => {
     error:
       statusCode === 400
         ? 'bad_request'
+        : statusCode === 401
+          ? 'unauthorized'
         : statusCode === 403
           ? 'forbidden'
-          : statusCode === 404
-            ? 'not_found'
+        : statusCode === 404
+          ? 'not_found'
+          : statusCode === 503
+            ? 'service_unavailable'
             : 'internal_server_error',
     message,
   });

@@ -1,15 +1,7 @@
-import {
-  buildMockBooking,
-  buildMockMatchResponse,
-  buildMockPlaceResults,
-  buildMockQuote,
-  buildMockRoutePreview,
-} from './mockBackend';
 import { Platform } from 'react-native';
 
 const REQUEST_TIMEOUT_MS = 8000;
 const configuredApiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim() || '';
-const allowMockFallbacks = process.env.EXPO_PUBLIC_ALLOW_DEV_MOCK_FALLBACKS === 'true';
 
 function resolveApiBaseUrl() {
   if (!configuredApiBaseUrl) {
@@ -42,6 +34,12 @@ function buildReachabilityHint(baseUrl) {
 const API_BASE_URL = resolveApiBaseUrl();
 
 export const hasApiBaseUrl = Boolean(API_BASE_URL);
+
+function assertApiConfigured() {
+  if (!API_BASE_URL) {
+    throw new Error('API base URL is not configured.');
+  }
+}
 
 async function requestJson(path, options = {}) {
   const { authToken, body, method = 'POST' } = options;
@@ -100,9 +98,7 @@ async function requestJson(path, options = {}) {
 }
 
 export async function requestOtp(phone) {
-  if (!API_BASE_URL) {
-    throw new Error('API base URL is not configured.');
-  }
+  assertApiConfigured();
 
   return requestJson('/api/auth/request-otp', {
     body: { phone },
@@ -110,9 +106,7 @@ export async function requestOtp(phone) {
 }
 
 export async function verifyOtp(phone, code) {
-  if (!API_BASE_URL) {
-    throw new Error('API base URL is not configured.');
-  }
+  assertApiConfigured();
 
   return requestJson('/api/auth/verify-otp', {
     body: { phone, code },
@@ -120,9 +114,7 @@ export async function verifyOtp(phone, code) {
 }
 
 export async function fetchSession(authToken) {
-  if (!API_BASE_URL) {
-    throw new Error('API base URL is not configured.');
-  }
+  assertApiConfigured();
 
   return requestJson('/api/auth/session', {
     authToken,
@@ -141,23 +133,23 @@ export async function logoutSession(authToken) {
   });
 }
 
+export async function updateMyProfile(payload, authToken) {
+  assertApiConfigured();
+
+  return requestJson('/api/me/profile', {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
 export async function previewRideMatches(payload, authToken) {
-  if (!API_BASE_URL) {
-    return buildMockMatchResponse(payload);
-  }
+  assertApiConfigured();
 
-  try {
-    return await requestJson('/api/ride-requests/preview-match', {
-      authToken,
-      body: payload,
-    });
-  } catch (error) {
-    if (allowMockFallbacks) {
-      return buildMockMatchResponse(payload);
-    }
-
-    throw error;
-  }
+  return requestJson('/api/ride-requests/preview-match', {
+    authToken,
+    body: payload,
+  });
 }
 
 export async function searchPlaces(query, options = {}) {
@@ -167,11 +159,7 @@ export async function searchPlaces(query, options = {}) {
     return { items: [] };
   }
 
-  if (!API_BASE_URL) {
-    return {
-      items: buildMockPlaceResults(trimmedQuery),
-    };
-  }
+  assertApiConfigured();
 
   const params = new URLSearchParams({
     q: trimmedQuery,
@@ -182,73 +170,39 @@ export async function searchPlaces(query, options = {}) {
     params.set('lng', String(options.focusPoint.longitude));
   }
 
-  try {
-    return await requestJson(`/api/maps/autocomplete?${params.toString()}`, {
-      method: 'GET',
-    });
-  } catch (error) {
-    if (!allowMockFallbacks) {
-      throw error;
-    }
-
-    return {
-      items: buildMockPlaceResults(trimmedQuery),
-    };
-  }
+  return requestJson(`/api/maps/autocomplete?${params.toString()}`, {
+    method: 'GET',
+  });
 }
 
 export async function fetchRoutePreview(payload) {
-  if (!API_BASE_URL) {
-    return buildMockRoutePreview(payload);
-  }
+  assertApiConfigured();
 
-  try {
-    return await requestJson('/api/maps/route', {
-      body: payload,
-    });
-  } catch (error) {
-    if (!allowMockFallbacks) {
-      throw error;
-    }
-
-    return buildMockRoutePreview(payload);
-  }
+  return requestJson('/api/maps/route', {
+    body: payload,
+  });
 }
 
 export async function fetchBookingQuote(payload, authToken) {
-  if (!API_BASE_URL) {
-    return buildMockQuote(payload);
-  }
+  assertApiConfigured();
 
-  try {
-    return await requestJson('/api/bookings/quote', {
-      authToken,
-      body: payload,
-    });
-  } catch (error) {
-    throw error;
-  }
+  return requestJson('/api/bookings/quote', {
+    authToken,
+    body: payload,
+  });
 }
 
 export async function confirmRideBooking(payload, authToken) {
-  if (!API_BASE_URL) {
-    return buildMockBooking(payload);
-  }
+  assertApiConfigured();
 
-  try {
-    return await requestJson('/api/bookings', {
-      authToken,
-      body: payload,
-    });
-  } catch (error) {
-    throw error;
-  }
+  return requestJson('/api/bookings', {
+    authToken,
+    body: payload,
+  });
 }
 
 export async function fetchBookingDetails(bookingId, authToken) {
-  if (!API_BASE_URL) {
-    throw new Error('API base URL is not configured.');
-  }
+  assertApiConfigured();
 
   return requestJson(`/api/bookings/${bookingId}`, {
     authToken,
@@ -257,9 +211,7 @@ export async function fetchBookingDetails(bookingId, authToken) {
 }
 
 export async function fetchMyBookings(authToken) {
-  if (!API_BASE_URL) {
-    return { items: [] };
-  }
+  assertApiConfigured();
 
   return requestJson('/api/me/bookings', {
     authToken,
@@ -268,9 +220,7 @@ export async function fetchMyBookings(authToken) {
 }
 
 export async function cancelRideBooking(bookingId, authToken) {
-  if (!API_BASE_URL) {
-    throw new Error('API base URL is not configured.');
-  }
+  assertApiConfigured();
 
   return requestJson(`/api/bookings/${bookingId}/cancel`, {
     authToken,
@@ -279,16 +229,7 @@ export async function cancelRideBooking(bookingId, authToken) {
 }
 
 export async function fetchDriverTrips(authToken) {
-  if (!API_BASE_URL) {
-    return {
-      items: [],
-      summary: {
-        activeTrips: 0,
-        completedTrips: 0,
-        earningsToday: 0,
-      },
-    };
-  }
+  assertApiConfigured();
 
   return requestJson('/api/driver/me/trips', {
     authToken,
@@ -297,9 +238,7 @@ export async function fetchDriverTrips(authToken) {
 }
 
 export async function updateDriverSettings(payload, authToken) {
-  if (!API_BASE_URL) {
-    throw new Error('API base URL is not configured.');
-  }
+  assertApiConfigured();
 
   return requestJson('/api/driver/me/settings', {
     authToken,
@@ -309,9 +248,7 @@ export async function updateDriverSettings(payload, authToken) {
 }
 
 export async function updateDriverTripStatus(bookingId, status, authToken) {
-  if (!API_BASE_URL) {
-    throw new Error('API base URL is not configured.');
-  }
+  assertApiConfigured();
 
   return requestJson(`/api/driver/bookings/${bookingId}/status`, {
     authToken,
@@ -321,9 +258,7 @@ export async function updateDriverTripStatus(bookingId, status, authToken) {
 }
 
 export async function acceptDriverRequest(requestId, authToken) {
-  if (!API_BASE_URL) {
-    throw new Error('API base URL is not configured.');
-  }
+  assertApiConfigured();
 
   return requestJson(`/api/driver/requests/${requestId}/accept`, {
     authToken,
@@ -332,13 +267,161 @@ export async function acceptDriverRequest(requestId, authToken) {
 }
 
 export async function updateDriverLocation(payload, authToken) {
-  if (!API_BASE_URL) {
-    throw new Error('API base URL is not configured.');
-  }
+  assertApiConfigured();
 
   return requestJson('/api/driver/me/location', {
     authToken,
     body: payload,
     method: 'PATCH',
   });
+}
+
+export async function fetchSavedPlaces(authToken) {
+  assertApiConfigured();
+
+  return requestJson('/api/me/saved-places', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function createSavedPlace(payload, authToken) {
+  assertApiConfigured();
+
+  return requestJson('/api/me/saved-places', {
+    authToken,
+    body: payload,
+    method: 'POST',
+  });
+}
+
+export async function updateSavedPlace(placeId, payload, authToken) {
+  assertApiConfigured();
+
+  return requestJson(`/api/me/saved-places/${placeId}`, {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function deleteSavedPlace(placeId, authToken) {
+  assertApiConfigured();
+
+  return requestJson(`/api/me/saved-places/${placeId}`, {
+    authToken,
+    method: 'DELETE',
+  });
+}
+
+export async function fetchPaymentMethods(authToken) {
+  assertApiConfigured();
+
+  return requestJson('/api/me/payment-methods', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function createPaymentMethod(payload, authToken) {
+  assertApiConfigured();
+
+  return requestJson('/api/me/payment-methods', {
+    authToken,
+    body: payload,
+    method: 'POST',
+  });
+}
+
+export async function updatePaymentMethod(methodId, payload, authToken) {
+  assertApiConfigured();
+
+  return requestJson(`/api/me/payment-methods/${methodId}`, {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function deletePaymentMethod(methodId, authToken) {
+  assertApiConfigured();
+
+  return requestJson(`/api/me/payment-methods/${methodId}`, {
+    authToken,
+    method: 'DELETE',
+  });
+}
+
+export async function fetchEmergencyContacts(authToken) {
+  assertApiConfigured();
+
+  return requestJson('/api/me/emergency-contacts', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export async function createEmergencyContact(payload, authToken) {
+  assertApiConfigured();
+
+  return requestJson('/api/me/emergency-contacts', {
+    authToken,
+    body: payload,
+    method: 'POST',
+  });
+}
+
+export async function updateEmergencyContact(contactId, payload, authToken) {
+  assertApiConfigured();
+
+  return requestJson(`/api/me/emergency-contacts/${contactId}`, {
+    authToken,
+    body: payload,
+    method: 'PATCH',
+  });
+}
+
+export async function deleteEmergencyContact(contactId, authToken) {
+  assertApiConfigured();
+
+  return requestJson(`/api/me/emergency-contacts/${contactId}`, {
+    authToken,
+    method: 'DELETE',
+  });
+}
+
+export async function fetchProfileSummary(authToken) {
+  assertApiConfigured();
+
+  return requestJson('/api/me/profile-summary', {
+    authToken,
+    method: 'GET',
+  });
+}
+
+export function subscribeToBookingUpdates(bookingId, authToken, handlers = {}) {
+  if (!bookingId || !authToken || !API_BASE_URL || typeof EventSource === 'undefined') {
+    return null;
+  }
+
+  const encodedBookingId = encodeURIComponent(bookingId);
+  const encodedToken = encodeURIComponent(authToken);
+  const source = new EventSource(
+    `${API_BASE_URL}/api/bookings/${encodedBookingId}/stream?access_token=${encodedToken}`
+  );
+
+  source.addEventListener('booking', (event) => {
+    try {
+      handlers.onBooking?.(JSON.parse(event.data));
+    } catch (error) {
+      handlers.onError?.(error);
+    }
+  });
+  source.addEventListener('error', (event) => {
+    handlers.onError?.(event);
+  });
+
+  return () => {
+    source.close();
+  };
 }

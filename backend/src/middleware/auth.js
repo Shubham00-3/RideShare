@@ -7,7 +7,7 @@ function readAuthToken(req) {
     return header.slice(7).trim();
   }
 
-  return req.headers['x-session-token'] || null;
+  return req.headers['x-session-token'] || req.query?.access_token || null;
 }
 
 async function optionalAuth(req, _res, next) {

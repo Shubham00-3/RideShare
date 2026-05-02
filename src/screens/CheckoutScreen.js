@@ -22,11 +22,13 @@ import {
   Users,
 } from 'lucide-react-native';
 import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
-import { USER_PROFILE } from '../constants/data';
+import { useAuth } from '../context/AuthContext';
 import { useRide } from '../context/RideContext';
 import { addScheduledRideToCalendar } from '../services/calendarService';
+import { fetchPaymentMethods } from '../services/api';
 
 export default function CheckoutScreen({ navigation }) {
+  const { token } = useAuth();
   const {
     createBooking,
     error,
@@ -39,7 +41,10 @@ export default function CheckoutScreen({ navigation }) {
   } = useRide();
   const [insurance, setInsurance] = useState(true);
   const [midTripPickup, setMidTripPickup] = useState(true);
-  const [selectedPayment, setSelectedPayment] = useState('upi');
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [paymentMethodsLoading, setPaymentMethodsLoading] = useState(false);
+  const [paymentMethodsError, setPaymentMethodsError] = useState(null);
+  const [selectedPayment, setSelectedPayment] = useState(null);
   const [syncCalendar, setSyncCalendar] = useState(true);
   const isScheduledRide = rideRequest?.rideType === 'schedule';
 
@@ -50,12 +55,52 @@ export default function CheckoutScreen({ navigation }) {
     });
   }, [insurance, midTripPickup, refreshQuote]);
 
-  const paymentMethods = USER_PROFILE.paymentMethods.map((method) => ({
-    id: method.type.toLowerCase(),
-    label: method.label,
-    type: method.type,
-    icon: method.type === 'UPI' ? 'UPI' : method.type,
-  }));
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadPaymentMethods() {
+      if (!token) {
+        setPaymentMethods([]);
+        setSelectedPayment(null);
+        return;
+      }
+
+      setPaymentMethodsLoading(true);
+      setPaymentMethodsError(null);
+
+      try {
+        const response = await fetchPaymentMethods(token);
+        const items = response.items || [];
+
+        if (isMounted) {
+          setPaymentMethods(items);
+          setSelectedPayment((currentSelection) => {
+            if (items.some((method) => method.id === currentSelection)) {
+              return currentSelection;
+            }
+
+            return items.find((method) => method.isPrimary)?.id || items[0]?.id || null;
+          });
+        }
+      } catch (paymentError) {
+        if (isMounted) {
+          setPaymentMethods([]);
+          setSelectedPayment(null);
+          setPaymentMethodsError(paymentError.message || 'Unable to load payment methods.');
+        }
+      } finally {
+        if (isMounted) {
+          setPaymentMethodsLoading(false);
+        }
+      }
+    }
+
+    loadPaymentMethods();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token]);
 
   const breakdown = quote?.breakdown;
   const totals = quote?.totals;
@@ -244,7 +289,23 @@ export default function CheckoutScreen({ navigation }) {
 
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Payment Method</Text>
-          {paymentMethods.map((method) => (
+          {paymentMethodsLoading ? (
+            <View style={styles.paymentEmpty}>
+              <ActivityIndicator color={COLORS.primary} />
+              <Text style={styles.paymentEmptyText}>Loading saved payment methods...</Text>
+            </View>
+          ) : paymentMethodsError ? (
+            <View style={styles.paymentEmpty}>
+              <Text style={styles.paymentEmptyText}>{paymentMethodsError}</Text>
+            </View>
+          ) : paymentMethods.length === 0 ? (
+            <View style={styles.paymentEmpty}>
+              <Text style={styles.paymentEmptyText}>
+                No saved payment methods yet. Add one in your profile before booking.
+              </Text>
+            </View>
+          ) : (
+            paymentMethods.map((method) => (
             <TouchableOpacity
               key={method.id}
               style={[
@@ -254,7 +315,7 @@ export default function CheckoutScreen({ navigation }) {
               onPress={() => setSelectedPayment(method.id)}
             >
               <View style={styles.paymentBadge}>
-                <Text style={styles.paymentBadgeText}>{method.icon}</Text>
+                <Text style={styles.paymentBadgeText}>{method.type}</Text>
               </View>
               <View style={styles.paymentInfo}>
                 <Text style={styles.paymentLabel}>{method.label}</Text>
@@ -266,7 +327,8 @@ export default function CheckoutScreen({ navigation }) {
                 </View>
               ) : null}
             </TouchableOpacity>
-          ))}
+            ))
+          )}
         </View>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -280,8 +342,11 @@ export default function CheckoutScreen({ navigation }) {
           <Text style={styles.payAmount}>{totals ? `₹${totals.total}` : '...'}</Text>
         </View>
         <TouchableOpacity
-          style={styles.payButton}
-          disabled={loading || !quote}
+          style={[
+            styles.payButton,
+            (!quote || !selectedPayment || paymentMethodsLoading) && styles.payButtonDisabled,
+          ]}
+          disabled={loading || !quote || !selectedPayment || paymentMethodsLoading}
           onPress={async () => {
             try {
               const booking = await createBooking({
@@ -577,6 +642,21 @@ const styles = StyleSheet.create({
     borderColor: COLORS.primary,
     backgroundColor: '#F8FBFF',
   },
+  paymentEmpty: {
+    minHeight: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radius_lg,
+    padding: 14,
+    gap: 8,
+  },
+  paymentEmptyText: {
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    ...FONTS.medium,
+  },
   paymentBadge: {
     width: 42,
     height: 42,
@@ -648,6 +728,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+  },
+  payButtonDisabled: {
+    opacity: 0.55,
   },
   payButtonText: {
     color: COLORS.textInverse,

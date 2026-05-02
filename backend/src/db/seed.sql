@@ -4,12 +4,27 @@ values
   ('gurgaon_cp_central', 'Gurgaon -> Central Delhi', 'Delhi-NCR', 'northbound', 'Cyber Hub', 'Connaught Place')
 on conflict (id) do nothing;
 
-insert into users (id, full_name, phone, email, role, rating)
+insert into users (id, full_name, phone, email, role, rating, gender, date_of_birth, profile_completed_at)
 values
-  ('11111111-1111-1111-1111-111111111111', 'Rajesh Kumar', '+919999900001', 'rajesh@rideshare.in', 'driver', 4.90),
-  ('22222222-2222-2222-2222-222222222222', 'Priya Malhotra', '+919999900002', 'priya@rideshare.in', 'driver', 4.80),
-  ('33333333-3333-3333-3333-333333333333', 'Amit Sharma', '+919999900003', 'amit@rideshare.in', 'driver', 4.70)
+  ('11111111-1111-1111-1111-111111111111', 'Rajesh Kumar', '+919999900001', 'rajesh@rideshare.in', 'driver', 4.90, 'male', '1988-04-12', now()),
+  ('22222222-2222-2222-2222-222222222222', 'Priya Malhotra', '+919999900002', 'priya@rideshare.in', 'driver', 4.80, 'female', '1991-09-22', now()),
+  ('33333333-3333-3333-3333-333333333333', 'Amit Sharma', '+919999900003', 'amit@rideshare.in', 'driver', 4.70, 'male', '1986-01-18', now())
 on conflict (id) do nothing;
+
+update users
+set
+  gender = case id
+    when '11111111-1111-1111-1111-111111111111' then 'male'
+    when '22222222-2222-2222-2222-222222222222' then 'female'
+    when '33333333-3333-3333-3333-333333333333' then 'male'
+    else gender
+  end,
+  profile_completed_at = coalesce(profile_completed_at, now())
+where id in (
+  '11111111-1111-1111-1111-111111111111',
+  '22222222-2222-2222-2222-222222222222',
+  '33333333-3333-3333-3333-333333333333'
+);
 
 insert into drivers (id, user_id, full_name, rating, trip_count, commission_percent, streak_count, return_trip_available)
 values

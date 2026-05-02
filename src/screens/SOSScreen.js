@@ -2,12 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, Linking } from 'react-native';
 import { AlertTriangle, Phone, MapPin, X, Shield, Users, Share2 } from 'lucide-react-native';
 import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
-import { USER_PROFILE } from '../constants/data';
+import { useAuth } from '../context/AuthContext';
+import { fetchEmergencyContacts } from '../services/api';
 
 export default function SOSScreen({ navigation }) {
+  const { token } = useAuth();
   const pulseAnim = useState(new Animated.Value(1))[0];
   const [countdown, setCountdown] = useState(5);
   const [activated, setActivated] = useState(false);
+  const [contactCount, setContactCount] = useState(0);
+  const [contactsError, setContactsError] = useState(null);
 
   useEffect(() => {
     Animated.loop(Animated.sequence([
@@ -22,6 +26,38 @@ export default function SOSScreen({ navigation }) {
       return () => clearTimeout(t);
     }
   }, [activated, countdown]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadEmergencyContacts() {
+      if (!token) {
+        setContactCount(0);
+        return;
+      }
+
+      setContactsError(null);
+
+      try {
+        const response = await fetchEmergencyContacts(token);
+
+        if (isMounted) {
+          setContactCount((response.items || []).length);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setContactCount(0);
+          setContactsError(error.message || 'Unable to load contacts');
+        }
+      }
+    }
+
+    loadEmergencyContacts();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token]);
 
   return (
     <View style={s.container}>
@@ -73,7 +109,7 @@ export default function SOSScreen({ navigation }) {
         <TouchableOpacity style={s.actionCard}>
           <View style={[s.actionIcon, {backgroundColor: COLORS.success+'15'}]}><Users size={22} color={COLORS.success} /></View>
           <Text style={s.actionLabel}>Contacts</Text>
-          <Text style={s.actionDesc}>{USER_PROFILE.emergencyContacts.length} saved</Text>
+          <Text style={s.actionDesc}>{contactsError || `${contactCount} saved`}</Text>
         </TouchableOpacity>
       </View>
 

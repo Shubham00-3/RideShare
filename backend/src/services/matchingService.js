@@ -1,10 +1,15 @@
-const seedCandidates = require('../data/seedCandidates');
 const db = require('../config/db');
 const { buildRoutePreview, ensureCoordinatePayload } = require('./mappingService');
 const { getGeometryOverlapScore, toNumber } = require('./routeMath');
 
 function normalizeLocation(value, fallback) {
   return value && String(value).trim().length > 0 ? String(value).trim() : fallback;
+}
+
+function buildStatusError(message, statusCode) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
 }
 
 function corridorFromLabels(pickup, dropoff) {
@@ -69,6 +74,8 @@ function buildRideRequest(payload) {
     rideType: payload.rideType || 'shared',
     seatsRequired: Number(payload.seatsRequired || 1),
     allowMidTripPickup: payload.allowMidTripPickup ?? true,
+    femaleDriverOnly: Boolean(payload.femaleDriverOnly),
+    femaleCopassengersOnly: Boolean(payload.femaleCopassengersOnly),
     departureTime: payload.departureTime || new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     corridorId: corridor.corridorId,
     corridorLabel: corridor.corridorLabel,
@@ -123,10 +130,12 @@ async function persistRideRequest(request, options = {}) {
         ride_type,
         seats_required,
         allow_mid_trip_pickup,
+        female_driver_only,
+        female_copassengers_only,
         departure_time,
         status
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, 'searching')
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, $15, $16, $17, $18, $19, 'searching')
       returning id
     `,
     [
@@ -146,6 +155,8 @@ async function persistRideRequest(request, options = {}) {
       request.rideType,
       request.seatsRequired,
       request.allowMidTripPickup,
+      request.femaleDriverOnly,
+      request.femaleCopassengersOnly,
       request.departureTime,
     ]
   );
@@ -154,6 +165,50 @@ async function persistRideRequest(request, options = {}) {
     ...request,
     id: result.rows[0]?.id || request.id,
   };
+}
+
+async function getUserPreferenceProfile(userId) {
+  const pool = db.getPool();
+
+  if (!pool || !userId) {
+    return {
+      gender: null,
+      role: null,
+    };
+  }
+
+  const result = await db.query(
+    `
+      select gender, role
+      from users
+      where id = $1
+      limit 1
+    `,
+    [userId]
+  );
+
+  return {
+    gender: result.rows[0]?.gender || null,
+    role: result.rows[0]?.role || null,
+  };
+}
+
+async function assertWomenOnlyPreferenceAccess(request, options = {}) {
+  if (!request.femaleDriverOnly && !request.femaleCopassengersOnly) {
+    return;
+  }
+
+  const profile =
+    options.userGender || options.userRole
+      ? {
+          gender: options.userGender || null,
+          role: options.userRole || null,
+        }
+      : await getUserPreferenceProfile(options.userId);
+
+  if (profile.gender !== 'female' || profile.role === 'driver') {
+    throw buildStatusError('Women-only ride preferences are available only to female rider accounts.', 403);
+  }
 }
 
 function overlapWindow(aStart, aEnd, bStart, bEnd) {
@@ -229,6 +284,7 @@ function vehicleVariants(candidate, overlapRatio) {
       fareValue: baseFare,
       farePerKm: `Rs. ${baseRatePerKm}/km`,
       driver: {
+        gender: candidate.driver_gender || null,
         name: candidate.driver_name,
         rating: toNumber(candidate.driver_rating),
         trips: candidate.driver_trip_count,
@@ -246,6 +302,7 @@ function vehicleVariants(candidate, overlapRatio) {
       fareValue: baseFare + 60,
       farePerKm: `Rs. ${baseRatePerKm + 2}/km`,
       driver: {
+        gender: candidate.driver_gender || null,
         name: candidate.driver_name,
         rating: toNumber(candidate.driver_rating),
         trips: candidate.driver_trip_count,
@@ -312,6 +369,16 @@ async function fetchCandidateRows(request) {
         t.route_geometry,
         t.route_distance_meters,
         t.route_duration_seconds,
+        driver_user.gender as driver_gender,
+        exists (
+          select 1
+          from bookings existing_booking
+          join ride_requests existing_request on existing_request.id = existing_booking.ride_request_id
+          join users existing_rider on existing_rider.id = existing_request.rider_id
+          where existing_booking.active_trip_id = t.id
+            and existing_booking.booking_status not in ('cancelled', 'completed')
+            and coalesce(existing_rider.gender, '') <> 'female'
+        ) as has_non_female_copassenger,
         d.full_name as driver_name,
         d.rating as driver_rating,
         d.trip_count as driver_trip_count,
@@ -323,6 +390,7 @@ async function fetchCandidateRows(request) {
       from active_trips t
       join corridors c on c.id = t.corridor_id
       join drivers d on d.id = t.driver_id
+      join users driver_user on driver_user.id = d.user_id
       join vehicles v on v.id = t.vehicle_id
       where t.status = 'open'
         and t.corridor_id = $1
@@ -332,7 +400,7 @@ async function fetchCandidateRows(request) {
     [request.corridorId, request.direction, request.seatsRequired]
   );
 
-  return result.rows.length > 0 ? result.rows : seedCandidates;
+  return result.rows;
 }
 
 async function previewMatches(payload, options = {}) {
@@ -348,6 +416,7 @@ async function previewMatches(payload, options = {}) {
     ...payload,
     route: routePreview,
   });
+  await assertWomenOnlyPreferenceAccess(initialRequest, options);
   const request = await persistRideRequest(initialRequest, options);
   const candidates = await fetchCandidateRows(request);
   const requestWindowEnd = new Date(
@@ -356,7 +425,12 @@ async function previewMatches(payload, options = {}) {
   const seatCompatibleCandidates = candidates.filter(
     (candidate) => candidate.available_seats >= request.seatsRequired
   );
-  const exactWindowCandidates = seatCompatibleCandidates.filter((candidate) =>
+  const preferenceCompatibleCandidates = seatCompatibleCandidates.filter(
+    (candidate) =>
+      (!request.femaleDriverOnly || candidate.driver_gender === 'female') &&
+      (!request.femaleCopassengersOnly || !candidate.has_non_female_copassenger)
+  );
+  const exactWindowCandidates = preferenceCompatibleCandidates.filter((candidate) =>
     overlapWindow(
       request.departureTime,
       requestWindowEnd,
@@ -365,7 +439,7 @@ async function previewMatches(payload, options = {}) {
     )
   );
   const candidatePool =
-    exactWindowCandidates.length > 0 ? exactWindowCandidates : seatCompatibleCandidates;
+    exactWindowCandidates.length > 0 ? exactWindowCandidates : preferenceCompatibleCandidates;
 
   const matches = candidatePool
     .map((candidate) => buildMatch(request, candidate))
@@ -379,7 +453,7 @@ async function previewMatches(payload, options = {}) {
       matches.length === 0
         ? 'empty'
         : exactWindowCandidates.length > 0
-          ? 'database-or-seed'
+          ? 'database'
           : 'relaxed-time-window',
   };
 }

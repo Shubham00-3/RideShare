@@ -265,6 +265,9 @@ export default function DriverDashboardScreen() {
   const driver = dashboard.driver;
   const isOnline = Boolean(driver?.isOnline);
   const returnTrip = Boolean(driver?.returnTripAvailable);
+  const femalePassengersOnly = Boolean(driver?.femalePassengersOnly);
+  const canChooseFemalePassengersOnly =
+    user?.gender === 'female' || driver?.gender === 'female';
 
   return (
     <View style={styles.container}>
@@ -328,6 +331,24 @@ export default function DriverDashboardScreen() {
               thumbColor={returnTrip ? COLORS.success : COLORS.textTertiary}
             />
           </View>
+          {canChooseFemalePassengersOnly ? (
+            <View style={[styles.toggleRow, styles.toggleDivider]}>
+              <View style={styles.toggleInfo}>
+                <Users size={18} color={COLORS.rose} />
+                <View>
+                  <Text style={styles.toggleLabel}>Female passengers only</Text>
+                  <Text style={styles.toggleSub}>Only show and accept requests from female riders</Text>
+                </View>
+              </View>
+              <Switch
+                disabled={settingsUpdating}
+                value={femalePassengersOnly}
+                onValueChange={(value) => handleSettingsChange({ femalePassengersOnly: value })}
+                trackColor={{ true: COLORS.rose + '40', false: COLORS.border }}
+                thumbColor={femalePassengersOnly ? COLORS.rose : COLORS.textTertiary}
+              />
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.card}>
@@ -605,6 +626,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  toggleDivider: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+    paddingTop: 14,
+    marginTop: 14,
   },
   toggleInfo: {
     flexDirection: 'row',

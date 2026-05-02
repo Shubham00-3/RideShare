@@ -15,6 +15,9 @@ create table if not exists users (
   full_name text not null,
   phone text not null unique,
   email text unique,
+  date_of_birth date,
+  gender text check (gender in ('female', 'male', 'non_binary', 'prefer_not_to_say')),
+  profile_completed_at timestamptz,
   role text not null check (role in ('rider', 'driver', 'admin')),
   rating numeric(3,2) not null default 5.0,
   created_at timestamptz not null default now()
@@ -30,6 +33,7 @@ create table if not exists drivers (
   commission_percent numeric(5,2) not null default 12.5,
   streak_count integer not null default 0,
   return_trip_available boolean not null default false,
+  female_passengers_only boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -64,6 +68,8 @@ create table if not exists ride_requests (
   ride_type text not null,
   seats_required integer not null default 1,
   allow_mid_trip_pickup boolean not null default true,
+  female_driver_only boolean not null default false,
+  female_copassengers_only boolean not null default false,
   departure_time timestamptz not null,
   status text not null default 'searching',
   created_at timestamptz not null default now()
@@ -106,6 +112,37 @@ create table if not exists bookings (
   created_at timestamptz not null default now()
 );
 
+create table if not exists saved_places (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  label text not null,
+  address text not null,
+  latitude numeric(10,6),
+  longitude numeric(10,6),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists payment_methods (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  type text not null,
+  label text not null,
+  is_primary boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists emergency_contacts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  name text not null,
+  phone text not null,
+  relationship text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists auth_otps (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
@@ -127,7 +164,8 @@ create table if not exists user_sessions (
 );
 
 alter table drivers
-  add column if not exists is_online boolean not null default true;
+  add column if not exists is_online boolean not null default true,
+  add column if not exists female_passengers_only boolean not null default false;
 
 alter table active_trips
   add column if not exists route_geometry jsonb,
@@ -146,4 +184,15 @@ alter table ride_requests
   add column if not exists dropoff_lng numeric(10,6),
   add column if not exists route_distance_meters integer,
   add column if not exists route_duration_seconds integer,
-  add column if not exists route_geometry jsonb;
+  add column if not exists route_geometry jsonb,
+  add column if not exists female_driver_only boolean not null default false,
+  add column if not exists female_copassengers_only boolean not null default false;
+
+alter table users
+  add column if not exists date_of_birth date,
+  add column if not exists gender text check (gender in ('female', 'male', 'non_binary', 'prefer_not_to_say')),
+  add column if not exists profile_completed_at timestamptz;
+
+create index if not exists saved_places_user_id_idx on saved_places(user_id);
+create index if not exists payment_methods_user_id_idx on payment_methods(user_id);
+create index if not exists emergency_contacts_user_id_idx on emergency_contacts(user_id);

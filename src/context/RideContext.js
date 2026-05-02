@@ -8,6 +8,7 @@ import {
   fetchMyBookings,
   hasApiBaseUrl,
   previewRideMatches,
+  subscribeToBookingUpdates,
 } from '../services/api';
 
 const RideContext = createContext(null);
@@ -21,6 +22,8 @@ const DEFAULT_SEARCH = {
   rideType: 'shared',
   seatsRequired: 1,
   allowMidTripPickup: true,
+  femaleDriverOnly: false,
+  femaleCopassengersOnly: false,
   departureTime: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
 };
 
@@ -53,6 +56,7 @@ export function RideProvider({ children }) {
   const [activeTrip, setActiveTrip] = useState(null);
   const [activeBookingId, setActiveBookingId] = useState(null);
   const [activeBookingSource, setActiveBookingSource] = useState(null);
+  const [activeTripConnection, setActiveTripConnection] = useState('idle');
   const [bookingHistory, setBookingHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -71,6 +75,7 @@ export function RideProvider({ children }) {
     setActiveTrip(null);
     setActiveBookingId(null);
     setActiveBookingSource(null);
+    setActiveTripConnection('idle');
     setBookingHistory([]);
     setError(null);
     setLoading(false);
@@ -97,6 +102,7 @@ export function RideProvider({ children }) {
       setActiveTrip(null);
       setActiveBookingId(null);
       setActiveBookingSource(null);
+      setActiveTripConnection('idle');
 
       return response;
     } catch (searchError) {
@@ -170,6 +176,7 @@ export function RideProvider({ children }) {
       setActiveTrip(booking.trip);
       setActiveBookingId(booking.bookingId);
       setActiveBookingSource(booking.source || 'api');
+      setActiveTripConnection('connecting');
       return booking;
     } catch (bookingError) {
       const message = bookingError.message || 'Unable to confirm ride right now.';
@@ -195,6 +202,7 @@ export function RideProvider({ children }) {
       setActiveBookingId(booking.bookingId);
       setActiveBookingSource(booking.source || 'api');
       setActiveTrip(booking.trip);
+      setActiveTripConnection('polling');
       return booking;
     } catch (bookingError) {
       if (bookingError.statusCode === 401) {
@@ -208,6 +216,33 @@ export function RideProvider({ children }) {
       setLoading(false);
     }
   }, [activeBookingId, signOut, token]);
+
+  useEffect(() => {
+    if (!activeBookingId || activeBookingSource !== 'api' || !token) {
+      setActiveTripConnection('idle');
+      return undefined;
+    }
+
+    setActiveTripConnection('connecting');
+    const unsubscribe = subscribeToBookingUpdates(activeBookingId, token, {
+      onBooking: (booking) => {
+        setActiveBookingId(booking.bookingId);
+        setActiveBookingSource(booking.source || 'api');
+        setActiveTrip(booking.trip);
+        setActiveTripConnection('streaming');
+      },
+      onError: () => {
+        setActiveTripConnection('polling');
+      },
+    });
+
+    if (!unsubscribe) {
+      setActiveTripConnection('polling');
+      return undefined;
+    }
+
+    return unsubscribe;
+  }, [activeBookingId, activeBookingSource, token]);
 
   const refreshBookingHistory = useCallback(async () => {
     if (!token || !hasApiBaseUrl) {
@@ -278,6 +313,7 @@ export function RideProvider({ children }) {
       if (bookingId === activeBookingId) {
         setActiveTrip(cancelledBooking.trip || buildCancelledTrip(activeTrip));
         setActiveBookingSource(cancelledBooking.source || activeBookingSource || 'api');
+        setActiveTripConnection('idle');
       }
 
       return cancelledBooking;
@@ -299,6 +335,7 @@ export function RideProvider({ children }) {
       activeBookingId,
       activeBookingSource,
       activeTrip,
+      activeTripConnection,
       bookingHistory,
       cancelBooking,
       chooseMatch,
@@ -323,6 +360,7 @@ export function RideProvider({ children }) {
       activeTrip,
       activeBookingId,
       activeBookingSource,
+      activeTripConnection,
       bookingHistory,
       error,
       loading,

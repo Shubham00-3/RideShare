@@ -7,6 +7,14 @@ function getReadinessStatus() {
     issues.push('DATABASE_URL is not configured.');
   }
 
+  if (env.isProduction && env.authExposeDevOtp) {
+    issues.push('AUTH_EXPOSE_DEV_OTP must be false in production.');
+  }
+
+  if (env.isProduction && env.allowedOrigin === '*') {
+    issues.push('ALLOWED_ORIGIN must be restricted in production.');
+  }
+
   if (!env.authExposeDevOtp) {
     if (!env.twilioAccountSid) {
       issues.push('TWILIO_ACCOUNT_SID is not configured.');
@@ -29,8 +37,13 @@ function getReadinessStatus() {
     issues.push('VALHALLA_BASE_URL is not configured.');
   }
 
+  if (env.isProduction && env.allowMappingFallbacks) {
+    issues.push('ALLOW_MAPPING_FALLBACKS must be false in production.');
+  }
+
   return {
     ok: issues.length === 0,
+    allowMappingFallbacks: env.allowMappingFallbacks,
     databaseConfigured: Boolean(env.databaseUrl),
     peliasConfigured: Boolean(env.peliasBaseUrl),
     twilioConfigured: Boolean(

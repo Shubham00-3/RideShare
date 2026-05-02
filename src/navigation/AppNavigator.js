@@ -12,6 +12,7 @@ import { useRide } from '../context/RideContext';
 // Screens
 import OnboardingScreen from '../screens/OnboardingScreen';
 import LoginScreen from '../screens/LoginScreen';
+import CompleteProfileScreen from '../screens/CompleteProfileScreen';
 import HomeScreen from '../screens/HomeScreen';
 import RideMatchScreen from '../screens/RideMatchScreen';
 import VehicleSelectScreen from '../screens/VehicleSelectScreen';
@@ -21,6 +22,8 @@ import BookingDetailScreen from '../screens/BookingDetailScreen';
 import TripHistoryScreen from '../screens/TripHistoryScreen';
 import DriverDashboardScreen from '../screens/DriverDashboardScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import ProfileDataScreen from '../screens/ProfileDataScreen';
+import ProfileSettingsScreen from '../screens/ProfileSettingsScreen';
 import SOSScreen from '../screens/SOSScreen';
 
 const Stack = createNativeStackNavigator();
@@ -90,12 +93,13 @@ function MainTabs() {
         tabBarInactiveTintColor: COLORS.textTertiary,
         tabBarStyle: {
           backgroundColor: COLORS.surface,
-          borderTopWidth: 0,
+          borderTopWidth: 1,
+          borderTopColor: COLORS.borderLight,
           elevation: 20,
-          shadowColor: '#000',
+          shadowColor: COLORS.brandInk,
           shadowOffset: { width: 0, height: -4 },
-          shadowOpacity: 0.1,
-          shadowRadius: 12,
+          shadowOpacity: 0.08,
+          shadowRadius: 16,
           height: hasActiveRide ? 92 : 85,
           paddingTop: 8,
           paddingBottom: 28,
@@ -142,7 +146,7 @@ function MainTabs() {
 }
 
 export default function AppNavigator() {
-  const { hydrated, isAuthenticated } = useAuth();
+  const { hydrated, isAuthenticated, user } = useAuth();
 
   if (!hydrated) {
     return (
@@ -163,7 +167,9 @@ export default function AppNavigator() {
           animation: 'slide_from_right',
         }}
       >
-        {isAuthenticated ? (
+        {isAuthenticated && !user?.profileComplete ? (
+          <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
+        ) : isAuthenticated ? (
           <>
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen name="RideMatch" component={RideMatchScreen} />
@@ -171,6 +177,8 @@ export default function AppNavigator() {
             <Stack.Screen name="Checkout" component={CheckoutScreen} />
             <Stack.Screen name="ActiveTrip" component={ActiveTripScreen} />
             <Stack.Screen name="BookingDetail" component={BookingDetailScreen} />
+            <Stack.Screen name="ProfileData" component={ProfileDataScreen} />
+            <Stack.Screen name="ProfileSettings" component={ProfileSettingsScreen} />
             <Stack.Screen name="SOS" component={SOSScreen} />
           </>
         ) : (
@@ -205,7 +213,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     marginBottom: 2,
     borderRadius: SIZES.radius_xl,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.brandInk,
     paddingHorizontal: 14,
     paddingVertical: 14,
     flexDirection: 'row',

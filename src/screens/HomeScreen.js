@@ -5,6 +5,7 @@ import {
   Dimensions,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -24,10 +25,10 @@ import {
   Zap,
 } from 'lucide-react-native';
 import { COLORS, FONTS, SHADOWS, SIZES } from '../constants/theme';
-import { USER_PROFILE } from '../constants/data';
+import { useAuth } from '../context/AuthContext';
 import { useRide } from '../context/RideContext';
 import RouteMap from '../components/RouteMap';
-import { fetchRoutePreview, searchPlaces } from '../services/api';
+import { fetchRoutePreview, fetchSavedPlaces, searchPlaces } from '../services/api';
 
 const { height } = Dimensions.get('window');
 
@@ -214,6 +215,7 @@ function formatBookingStatus(status) {
 }
 
 export default function HomeScreen({ navigation }) {
+  const { token, user } = useAuth();
   const {
     activeBookingId,
     bookingHistory,
@@ -226,6 +228,10 @@ export default function HomeScreen({ navigation }) {
   const [pickup, setPickup] = useState(searchForm.pickup);
   const [dropoff, setDropoff] = useState(searchForm.dropoff);
   const [selectedType, setSelectedType] = useState(searchForm.rideType);
+  const [femaleDriverOnly, setFemaleDriverOnly] = useState(Boolean(searchForm.femaleDriverOnly));
+  const [femaleCopassengersOnly, setFemaleCopassengersOnly] = useState(
+    Boolean(searchForm.femaleCopassengersOnly)
+  );
   const [scheduledDeparture, setScheduledDeparture] = useState(
     new Date(searchForm.departureTime)
   );
@@ -235,15 +241,35 @@ export default function HomeScreen({ navigation }) {
   const [dropoffSuggestions, setDropoffSuggestions] = useState([]);
   const [activeField, setActiveField] = useState(null);
   const [routingLoading, setRoutingLoading] = useState(false);
+  const [locationSearchError, setLocationSearchError] = useState(null);
+  const [savedPlaces, setSavedPlaces] = useState([]);
+  const [savedPlacesLoading, setSavedPlacesLoading] = useState(false);
+  const [savedPlacesError, setSavedPlacesError] = useState(null);
+  const canUseWomenOnlyPreferences = user?.gender === 'female' && user?.role !== 'driver';
 
   useEffect(() => {
     setPickup(searchForm.pickup);
     setDropoff(searchForm.dropoff);
     setSelectedType(searchForm.rideType);
+    setFemaleDriverOnly(
+      canUseWomenOnlyPreferences && Boolean(searchForm.femaleDriverOnly)
+    );
+    setFemaleCopassengersOnly(
+      canUseWomenOnlyPreferences && Boolean(searchForm.femaleCopassengersOnly)
+    );
     setPickupLocation(searchForm.pickupLocation || null);
     setDropoffLocation(searchForm.dropoffLocation || null);
     setScheduledDeparture(new Date(searchForm.departureTime));
-  }, [searchForm]);
+  }, [canUseWomenOnlyPreferences, searchForm]);
+
+  useEffect(() => {
+    if (canUseWomenOnlyPreferences) {
+      return;
+    }
+
+    setFemaleDriverOnly(false);
+    setFemaleCopassengersOnly(false);
+  }, [canUseWomenOnlyPreferences]);
 
   useEffect(() => {
     const timeoutId = setTimeout(async () => {
@@ -252,8 +278,14 @@ export default function HomeScreen({ navigation }) {
         return;
       }
 
-      const response = await searchPlaces(pickup);
-      setPickupSuggestions(response.items || []);
+      try {
+        const response = await searchPlaces(pickup);
+        setPickupSuggestions(response.items || []);
+        setLocationSearchError(null);
+      } catch (placesError) {
+        setPickupSuggestions([]);
+        setLocationSearchError(placesError.message || 'Unable to load pickup suggestions.');
+      }
     }, 220);
 
     return () => clearTimeout(timeoutId);
@@ -266,10 +298,16 @@ export default function HomeScreen({ navigation }) {
         return;
       }
 
-      const response = await searchPlaces(dropoff, {
-        focusPoint: pickupLocation?.coordinates || null,
-      });
-      setDropoffSuggestions(response.items || []);
+      try {
+        const response = await searchPlaces(dropoff, {
+          focusPoint: pickupLocation?.coordinates || null,
+        });
+        setDropoffSuggestions(response.items || []);
+        setLocationSearchError(null);
+      } catch (placesError) {
+        setDropoffSuggestions([]);
+        setLocationSearchError(placesError.message || 'Unable to load dropoff suggestions.');
+      }
     }, 220);
 
     return () => clearTimeout(timeoutId);
@@ -286,6 +324,43 @@ export default function HomeScreen({ navigation }) {
 
     return undefined;
   }, [refreshBookingHistory, selectedType]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSavedPlaces() {
+      if (!token) {
+        setSavedPlaces([]);
+        return;
+      }
+
+      setSavedPlacesLoading(true);
+      setSavedPlacesError(null);
+
+      try {
+        const response = await fetchSavedPlaces(token);
+
+        if (isMounted) {
+          setSavedPlaces(response.items || []);
+        }
+      } catch (placesError) {
+        if (isMounted) {
+          setSavedPlaces([]);
+          setSavedPlacesError(placesError.message || 'Unable to load saved places.');
+        }
+      } finally {
+        if (isMounted) {
+          setSavedPlacesLoading(false);
+        }
+      }
+    }
+
+    loadSavedPlaces();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token]);
 
   const rideTypes = [
     { id: 'shared', label: 'Shared Ride', icon: Users, savings: 'Save 40%', color: COLORS.success },
@@ -349,6 +424,9 @@ export default function HomeScreen({ navigation }) {
         route,
         rideType: selectedType,
         allowMidTripPickup: selectedType !== 'solo',
+        femaleDriverOnly: canUseWomenOnlyPreferences && femaleDriverOnly,
+        femaleCopassengersOnly:
+          canUseWomenOnlyPreferences && selectedType !== 'solo' && femaleCopassengersOnly,
         departureTime:
           selectedType === 'schedule'
             ? scheduledDeparture.toISOString()
@@ -423,7 +501,8 @@ export default function HomeScreen({ navigation }) {
             <Text style={styles.locationText}>Delhi-NCR</Text>
           </View>
           <View style={styles.nearbyBadge}>
-            <Text style={styles.nearbyText}>Partial-route matching live</Text>
+            <Zap size={13} color={COLORS.textInverse} />
+            <Text style={styles.nearbyText}>Smart pool live</Text>
           </View>
         </View>
 
@@ -446,10 +525,15 @@ export default function HomeScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.sheetHandle} />
-        <Text style={styles.sheetTitle}>Match overlapping routes</Text>
-        <Text style={styles.sheetSubtitle}>
-          Search for rides even if your destination is only partially aligned with another rider.
-        </Text>
+        <View style={styles.sheetHeadingRow}>
+          <View>
+            <Text style={styles.sheetEyebrow}>Route overlap engine</Text>
+            <Text style={styles.sheetTitle}>Where are you headed?</Text>
+          </View>
+          <View style={styles.liveBadge}>
+            <Text style={styles.liveBadgeText}>LIVE</Text>
+          </View>
+        </View>
 
         <View style={styles.inputsContainer}>
           <View style={styles.inputDots}>
@@ -537,6 +621,43 @@ export default function HomeScreen({ navigation }) {
             ))}
           </View>
         </ScrollView>
+
+        {canUseWomenOnlyPreferences ? (
+          <View style={styles.safetyOptionsCard}>
+            <View style={styles.safetyOptionsHeader}>
+              <Shield size={18} color={COLORS.primary} />
+              <Text style={styles.safetyOptionsTitle}>Safety preferences</Text>
+            </View>
+            <View style={styles.preferenceRow}>
+              <View style={styles.preferenceCopy}>
+                <Text style={styles.preferenceLabel}>Female driver only</Text>
+                <Text style={styles.preferenceText}>Show matches with a female driver.</Text>
+              </View>
+              <Switch
+                value={femaleDriverOnly}
+                onValueChange={setFemaleDriverOnly}
+                trackColor={{ true: `${COLORS.primary}40`, false: COLORS.border }}
+                thumbColor={femaleDriverOnly ? COLORS.primary : COLORS.textTertiary}
+              />
+            </View>
+            {selectedType !== 'solo' ? (
+              <View style={[styles.preferenceRow, styles.preferenceDivider]}>
+                <View style={styles.preferenceCopy}>
+                  <Text style={styles.preferenceLabel}>Female co-passengers only</Text>
+                  <Text style={styles.preferenceText}>
+                    Avoid shared trips that already include non-female riders.
+                  </Text>
+                </View>
+                <Switch
+                  value={femaleCopassengersOnly}
+                  onValueChange={setFemaleCopassengersOnly}
+                  trackColor={{ true: `${COLORS.success}40`, false: COLORS.border }}
+                  thumbColor={femaleCopassengersOnly ? COLORS.success : COLORS.textTertiary}
+                />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
 
         <View style={styles.strategyCard}>
           <Text style={styles.strategyTitle}>MVP corridor strategy</Text>
@@ -756,34 +877,59 @@ export default function HomeScreen({ navigation }) {
         ) : null}
 
         <View style={styles.quickPlaces}>
-          {USER_PROFILE.savedPlaces.map((place) => (
-            <TouchableOpacity
-              key={place.id}
-              style={styles.quickPlace}
-              onPress={() => {
-                if (place.label === 'Home') {
-                  setPickup(place.address);
-                  setPickupLocation(null);
-                } else {
-                  setDropoff(place.address);
-                  setDropoffLocation(null);
-                }
-              }}
-            >
-              <View style={styles.quickPlaceIcon}>
-                <Star size={14} color={COLORS.primary} />
-              </View>
-              <View style={styles.quickPlaceInfo}>
-                <Text style={styles.quickPlaceLabel}>{place.label}</Text>
-                <Text style={styles.quickPlaceAddress} numberOfLines={1}>
-                  {place.address}
-                </Text>
-              </View>
-              <ChevronRight size={16} color={COLORS.textTertiary} />
-            </TouchableOpacity>
-          ))}
+          {savedPlacesLoading ? (
+            <View style={styles.quickPlaceEmpty}>
+              <ActivityIndicator color={COLORS.primary} />
+              <Text style={styles.quickPlaceEmptyText}>Loading saved places...</Text>
+            </View>
+          ) : savedPlacesError ? (
+            <View style={styles.quickPlaceEmpty}>
+              <Text style={styles.quickPlaceEmptyText}>{savedPlacesError}</Text>
+            </View>
+          ) : savedPlaces.length === 0 ? (
+            <View style={styles.quickPlaceEmpty}>
+              <Text style={styles.quickPlaceEmptyText}>No saved places yet.</Text>
+            </View>
+          ) : (
+            savedPlaces.map((place) => (
+              <TouchableOpacity
+                key={place.id}
+                style={styles.quickPlace}
+                onPress={() => {
+                  const placeLocation = place.coordinates
+                    ? {
+                        id: place.id,
+                        label: place.address,
+                        name: place.label,
+                        coordinates: place.coordinates,
+                      }
+                    : null;
+
+                  if (place.label?.toLowerCase() === 'home') {
+                    setPickup(place.address);
+                    setPickupLocation(placeLocation);
+                  } else {
+                    setDropoff(place.address);
+                    setDropoffLocation(placeLocation);
+                  }
+                }}
+              >
+                <View style={styles.quickPlaceIcon}>
+                  <Star size={14} color={COLORS.primary} />
+                </View>
+                <View style={styles.quickPlaceInfo}>
+                  <Text style={styles.quickPlaceLabel}>{place.label}</Text>
+                  <Text style={styles.quickPlaceAddress} numberOfLines={1}>
+                    {place.address}
+                  </Text>
+                </View>
+                <ChevronRight size={16} color={COLORS.textTertiary} />
+              </TouchableOpacity>
+            ))
+          )}
         </View>
 
+        {locationSearchError ? <Text style={styles.errorText}>{locationSearchError}</Text> : null}
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <TouchableOpacity
@@ -822,7 +968,7 @@ const styles = StyleSheet.create({
   },
   mapPlaceholder: {
     flex: 1,
-    backgroundColor: '#E8ECF0',
+    backgroundColor: '#DCEBFF',
     position: 'relative',
     overflow: 'hidden',
   },
@@ -905,7 +1051,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: `${COLORS.surface}EE`,
+    backgroundColor: `${COLORS.surface}F5`,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 20,
@@ -915,7 +1061,10 @@ const styles = StyleSheet.create({
     ...FONTS.semiBold,
   },
   nearbyBadge: {
-    backgroundColor: `${COLORS.primary}E6`,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.brandInk,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 20,
@@ -947,8 +1096,8 @@ const styles = StyleSheet.create({
   },
   bottomSheet: {
     backgroundColor: COLORS.surface,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
     minHeight: height * 0.53,
     ...SHADOWS.large,
   },
@@ -965,22 +1114,44 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 14,
   },
+  sheetHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 14,
+    marginBottom: 18,
+  },
+  sheetEyebrow: {
+    color: COLORS.primary,
+    textTransform: 'uppercase',
+    fontSize: SIZES.xs,
+    ...FONTS.bold,
+  },
   sheetTitle: {
     fontSize: SIZES.xxl,
     color: COLORS.textPrimary,
+    marginTop: 4,
     ...FONTS.bold,
   },
-  sheetSubtitle: {
-    color: COLORS.textSecondary,
-    marginTop: 6,
-    marginBottom: 18,
-    ...FONTS.regular,
+  liveBadge: {
+    borderRadius: SIZES.radius_full,
+    backgroundColor: `${COLORS.success}16`,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  liveBadgeText: {
+    color: COLORS.success,
+    fontSize: SIZES.xs,
+    ...FONTS.bold,
   },
   inputsContainer: {
     flexDirection: 'row',
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.surfaceElevated,
     borderRadius: SIZES.radius_xl,
-    padding: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    ...SHADOWS.small,
   },
   inputDots: {
     alignItems: 'center',
@@ -1071,15 +1242,16 @@ const styles = StyleSheet.create({
   },
   rideTypeCard: {
     width: 132,
-    backgroundColor: COLORS.background,
-    borderRadius: SIZES.radius_lg,
+    backgroundColor: COLORS.surfaceElevated,
+    borderRadius: SIZES.radius_xl,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: COLORS.borderLight,
   },
   rideTypeCardActive: {
     borderColor: COLORS.primary,
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.surfaceSoft,
+    ...SHADOWS.small,
   },
   rideTypeIcon: {
     width: 40,
@@ -1110,11 +1282,57 @@ const styles = StyleSheet.create({
     fontSize: SIZES.xs,
     ...FONTS.semiBold,
   },
-  strategyCard: {
-    backgroundColor: '#F5F8FF',
-    borderRadius: SIZES.radius_lg,
+  safetyOptionsCard: {
+    backgroundColor: '#F8FBFF',
+    borderRadius: SIZES.radius_xl,
     padding: 14,
     marginTop: 16,
+    borderWidth: 1,
+    borderColor: COLORS.brandMist,
+  },
+  safetyOptionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  safetyOptionsTitle: {
+    color: COLORS.textPrimary,
+    ...FONTS.semiBold,
+  },
+  preferenceRow: {
+    minHeight: 66,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 10,
+  },
+  preferenceDivider: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.borderLight,
+  },
+  preferenceCopy: {
+    flex: 1,
+  },
+  preferenceLabel: {
+    color: COLORS.textPrimary,
+    ...FONTS.medium,
+  },
+  preferenceText: {
+    color: COLORS.textSecondary,
+    marginTop: 3,
+    lineHeight: 18,
+    fontSize: SIZES.sm,
+    ...FONTS.regular,
+  },
+  strategyCard: {
+    backgroundColor: COLORS.surfaceWarm,
+    borderRadius: SIZES.radius_xl,
+    padding: 14,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#FFE1C8',
   },
   strategyTitle: {
     color: COLORS.textPrimary,
@@ -1388,9 +1606,27 @@ const styles = StyleSheet.create({
   quickPlace: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.background,
-    borderRadius: SIZES.radius_lg,
+    backgroundColor: COLORS.surfaceElevated,
+    borderRadius: SIZES.radius_xl,
     padding: 12,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+  },
+  quickPlaceEmpty: {
+    minHeight: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surfaceElevated,
+    borderRadius: SIZES.radius_xl,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    gap: 8,
+  },
+  quickPlaceEmptyText: {
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    ...FONTS.medium,
   },
   quickPlaceIcon: {
     width: 34,
@@ -1420,13 +1656,14 @@ const styles = StyleSheet.create({
   },
   findButton: {
     marginTop: 18,
-    backgroundColor: COLORS.primary,
-    borderRadius: SIZES.radius_lg,
+    backgroundColor: COLORS.brandInk,
+    borderRadius: SIZES.radius_xl,
     paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+    ...SHADOWS.medium,
   },
   findButtonText: {
     color: COLORS.textInverse,

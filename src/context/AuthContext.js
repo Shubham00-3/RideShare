@@ -4,6 +4,7 @@ import {
   hasApiBaseUrl,
   logoutSession,
   requestOtp as requestOtpApi,
+  updateMyProfile,
   verifyOtp as verifyOtpApi,
 } from '../services/api';
 import {
@@ -151,9 +152,35 @@ export function AuthProvider({ children }) {
     }
   }, [clearSession, session?.token]);
 
+  const completeProfile = useCallback(async (profile) => {
+    if (!session?.token) {
+      throw new Error('Sign in before completing your profile.');
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await updateMyProfile(profile, session.token);
+      const nextSession = {
+        ...session,
+        user: response.user,
+      };
+      setSession(nextSession);
+      return nextSession;
+    } catch (profileError) {
+      const message = profileError.message || 'Unable to save your profile right now.';
+      setError(message);
+      throw profileError;
+    } finally {
+      setLoading(false);
+    }
+  }, [session]);
+
   const value = useMemo(
     () => ({
       error,
+      completeProfile,
       hydrated,
       isAuthenticated: Boolean(session?.token),
       loading,
@@ -166,7 +193,7 @@ export function AuthProvider({ children }) {
       user: session?.user || null,
       verifyOtp,
     }),
-    [error, hydrated, loading, refreshSession, requestOtp, session, signOut, verifyOtp]
+    [completeProfile, error, hydrated, loading, refreshSession, requestOtp, session, signOut, verifyOtp]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
